@@ -1,9 +1,11 @@
-from models import (
-    ResBlock2,
-    GeneratorArgs,
+from modules import SpeechReconstructorModule, SpeechReconstructorArgs
+from models.generator import GeneratorArgs, ResBlock2
+from dataset import (
+    MelArgs,
+    SpeechDataset,
+    GenshinDataset,
+    MelDataset,
 )
-from modules import SpeechReconstructorModule
-from dataset import SpeechDataset, GenshinDataset, SpeechDataLoader
 from lightning import Trainer
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
@@ -18,31 +20,32 @@ class TrainArgs:
     exp_name: str
     epochs: int
     batch_size: int
-    generator_args: GeneratorArgs
-    optimizer_args: OptimizerArgs
-    scheduler_args: SchedulerArgs
+    sr_args: SpeechReconstructorArgs
 
 
 def train(args: TrainArgs, parquets_folder: str):
-    dataset = SpeechDataset.from_speaker_audio_provider(
-        GenshinDataset.from_parquets(parquets_folder)
+    dataset = MelDataset.from_speech_dataset(
+        SpeechDataset.from_speaker_audio_provider(
+            GenshinDataset.from_parquets(parquets_folder)
+        ),
+        args.sr_args.mel_args,
     )
     train_size = int(0.8 * len(dataset))
     eval_size = len(dataset) - train_size
     train_dataset, eval_dataset = torch.utils.data.random_split(
         dataset, [train_size, eval_size]
     )
-    train_loader = SpeechDataLoader(
+    train_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
     )
-    eval_loader = SpeechDataLoader(
+    eval_loader = torch.utils.data.DataLoader(
         dataset=eval_dataset,
         batch_size=args.batch_size,
     )
 
-    sr_module = SpeechReconstructorModule(args.generator_args)
+    sr_module = SpeechReconstructorModule(args.sr_args)
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         dirpath="exp/%s/checkpoints/" % args.exp_name,
@@ -59,22 +62,36 @@ def train(args: TrainArgs, parquets_folder: str):
 
 
 if __name__ == "__main__":
+    import sys
+
     train(
         TrainArgs(
             exp_name="speech_reconstruction",
             epochs=10,
             batch_size=16,
-            generator_args=GeneratorArgs(
-                initial_channel=80,  # the output of WavLM, what's the structure?
-                resblock=ResBlock2,
-                resblock_kernel_sizes=[3, 5, 7],
-                resblock_dilation_sizes=[[1, 2], [2, 6], [3, 12]],
-                upsample_rates=[8, 8, 4],
-                upsample_initial_channel=256,
-                upsample_kernel_sizes=[16, 16, 8],
+            sr_args=SpeechReconstructorArgs(
+                learning_rate=0.0002,
+                generator_args=GeneratorArgs(
+                    # https://github.com/jik876/hifi-gan/blob/master/config_v3.json
+                    # https://github.com/fishaudio/Bert-VITS2/blob/master/configs/config.json#L938
+                    initial_channel=512,  # the extracted feature dim of WavLM
+                    resblock=ResBlock2,
+                    resblock_kernel_sizes=[3, 5, 7],
+                    resblock_dilation_sizes=[[1, 2], [2, 6], [3, 12]],
+                    upsample_rates=[8, 8, 4, 2, 2],
+                    upsample_initial_channel=512,
+                    upsample_kernel_sizes=[16, 16, 8, 2, 2],
+                ),
+                mel_args=MelArgs(
+                    segment_size=16384,
+                    n_fft=1024,
+                    num_mels=80,
+                    hop_size=256,
+                    win_size=1024,
+                    sampling_rate=48000,
+                    fmin=0,
+                ),
             ),
-            optimizer_args=OptimizerArgs(learning_rate=0.0002),
-            scheduler_args=SchedulerArgs(),
         ),
-        "/mnt/d/Download/genshin_voice_3.5/genshin-voice-v3.5-mandarin/data/",
+        sys.argv[1],
     )

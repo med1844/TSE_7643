@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from concurrent.futures import ProcessPoolExecutor
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 import numpy as np
 from torch.utils.data.dataloader import Dataset, DataLoader
@@ -15,7 +15,7 @@ from operator import or_
 from librosa.filters import mel as librosa_mel_fn
 import random
 import torch.utils.data
-
+from dataclasses import dataclass
 from audio_commons import read_wav_at_fs
 
 
@@ -69,7 +69,7 @@ class GenshinDataset(SpeakerAudioProvider):
         dfs = [
             pd.read_parquet(filename)
             for filename in tqdm(
-                glob(os.path.join(parquet_folder, "*.parquet"))[:2], desc="parquet file"
+                glob(os.path.join(parquet_folder, "*.parquet")), desc="parquet file"
             )
         ]
 
@@ -234,6 +234,7 @@ def mel_spectrogram(
         pad_mode="reflect",
         normalized=False,
         onesided=True,
+        return_complex=False,
     )
 
     spec = torch.sqrt(spec.pow(2).sum(-1) + (1e-9))
@@ -244,8 +245,8 @@ def mel_spectrogram(
     return spec
 
 
+@dataclass
 class MelArgs:
-    training_files: List[torch.Tensor]
     segment_size: int
     n_fft: int
     num_mels: int
@@ -253,42 +254,40 @@ class MelArgs:
     win_size: int
     sampling_rate: int
     fmin: int
-    fmax: int
-    split = True
-    shuffle = True
-    fmax_loss: Optional[int] = None
+    fmax: Optional[int] = None
+
+
+MelDatasetOutput = Tuple[torch.Tensor, torch.Tensor]
 
 
 class MelDataset(torch.utils.data.Dataset):
-    def __init__(self, args: MelArgs):
-        self.audios = args.training_files
+    def __init__(self, audios: List[torch.Tensor], args: MelArgs):
+        self.audios = [
+            a
+            for a in audios
+            if 5 * args.sampling_rate <= a.shape[-1] < 15 * args.sampling_rate
+        ]
         self.segment_size = args.segment_size
         self.sampling_rate = args.sampling_rate
-        self.split = args.split
         self.n_fft = args.n_fft
         self.num_mels = args.num_mels
         self.hop_size = args.hop_size
         self.win_size = args.win_size
         self.fmin = args.fmin
         self.fmax = args.fmax
-        self.fmax_loss = (
-            args.fmax_loss
-        )  # max f counted into loss, as higher freqs often only contains white noise
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> MelDatasetOutput:
         audio = self.audios[index]
         audio = torch.FloatTensor(audio)
-        audio = audio.unsqueeze(0)
 
-        if self.split:
-            if audio.size(-1) >= self.segment_size:
-                max_audio_start = audio.size(1) - self.segment_size
-                audio_start = random.randint(0, max_audio_start)
-                audio = audio[:, audio_start : audio_start + self.segment_size]
-            else:
-                audio = torch.nn.functional.pad(
-                    audio, (0, self.segment_size - audio.size(1)), "constant"
-                )
+        if audio.size(-1) >= self.segment_size:
+            max_audio_start = audio.size(-1) - self.segment_size
+            audio_start = random.randint(0, max_audio_start)
+            audio = audio[..., audio_start : audio_start + self.segment_size]
+        else:
+            audio = torch.nn.functional.pad(
+                audio, (0, self.segment_size - audio.size(1)), "constant"
+            )
 
         mel = mel_spectrogram(
             audio,
@@ -302,26 +301,14 @@ class MelDataset(torch.utils.data.Dataset):
             center=False,
         )
 
-        mel_loss = mel_spectrogram(
-            audio,
-            self.n_fft,
-            self.num_mels,
-            self.sampling_rate,
-            self.hop_size,
-            self.win_size,
-            self.fmin,
-            self.fmax_loss,
-            center=False,
-        )
-
-        return (mel.squeeze(), audio.squeeze(0), mel_loss.squeeze())
+        return (mel.squeeze(), audio.squeeze(0))
 
     def __len__(self):
         return len(self.audios)
 
     @classmethod
-    def from_speech_dataset(cls, dataset: SpeechDataset) -> "MelDataset":
-        cls()
+    def from_speech_dataset(cls, dataset: SpeechDataset, args: MelArgs) -> "MelDataset":
+        return cls(dataset.audios, args)
 
 
 if __name__ == "__main__":

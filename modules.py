@@ -1,16 +1,17 @@
 from typing import List, Tuple
 import lightning as ln
-from models import (
-    Generator,
-    MultiPeriodDiscriminator,
-    MultiScaleDiscriminator,
-    GeneratorArgs,
-)
+from models.generator import Generator, GeneratorArgs
+from models.mpd import MultiPeriodDiscriminator
+from models.msd import MultiScaleDiscriminator
 from transformers import WavLMConfig, WavLMModel
+from transformers.modeling_outputs import Wav2Vec2BaseModelOutput
 import torch
 import itertools
 from dataclasses import dataclass
 from serde import serde
+from losses import feature_loss, discriminator_loss, generator_loss
+from dataset import MelDatasetOutput, mel_spectrogram, MelArgs
+import torchaudio
 
 
 @serde
@@ -18,6 +19,7 @@ from serde import serde
 class SpeechReconstructorArgs:
     learning_rate: float
     generator_args: GeneratorArgs
+    mel_args: MelArgs
     adam_beta = (0.9, 0.99)
     lr_decay = 0.999
 
@@ -31,13 +33,81 @@ class SpeechReconstructorModule(ln.LightningModule):
         self.mpd = MultiPeriodDiscriminator()
         self.msd = MultiScaleDiscriminator()
 
-    def training_step(self, x: torch.Tensor) -> torch.Tensor:
-        y = self.wavlm(x)
-        return y
+        self.automatic_optimization = False
 
-    def validation_step(self, x: torch.Tensor) -> torch.Tensor:
-        y = self.wavlm(x)
-        return y
+        self.wavlm.requires_grad_(False)
+
+    def training_step(self, in_: MelDatasetOutput) -> None:
+        # https://github.com/jik876/hifi-gan/blob/master/train.py
+        optim_g, optim_d = self.optimizers(use_pl_optimizer=True)
+
+        mel_args = self.args.mel_args
+        y_mel, y = in_
+        x: Wav2Vec2BaseModelOutput = self.wavlm(
+            torchaudio.functional.resample(y, 48000, 16000)
+        )
+        y_g_hat = self.generator(
+            x.extract_features.permute(0, 2, 1)  # (B, T, D) -> (B, D, T), D = 512
+        )
+        y_g_hat_mel = mel_spectrogram(
+            y_g_hat.squeeze(1),
+            mel_args.n_fft,
+            mel_args.num_mels,
+            mel_args.sampling_rate,
+            mel_args.hop_size,
+            mel_args.win_size,
+            mel_args.fmin,
+            mel_args.fmax,
+        )
+
+        optim_d.zero_grad()
+
+        # MPD
+        y_df_hat_r, y_df_hat_g, _, _ = self.mpd(y.unsqueeze(1), y_g_hat.detach())
+        loss_disc_f, _, _ = discriminator_loss(y_df_hat_r, y_df_hat_g)
+        # MSD
+        y_ds_hat_r, y_ds_hat_g, _, _ = self.msd(y.unsqueeze(1), y_g_hat.detach())
+        loss_disc_s, _, _ = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
+
+        loss_disc_all = loss_disc_s + loss_disc_f
+        self.manual_backward(loss_disc_all)
+        optim_d.step()
+
+        optim_g.zero_grad()
+        # L1 Mel-Spectrogram Loss
+        loss_mel = torch.nn.functional.l1_loss(y_mel, y_g_hat_mel) * 45
+
+        y_df_hat_r, y_df_hat_g, fmap_f_r, fmap_f_g = self.mpd(y.unsqueeze(1), y_g_hat)
+        y_ds_hat_r, y_ds_hat_g, fmap_s_r, fmap_s_g = self.msd(y.unsqueeze(1), y_g_hat)
+        loss_fm_f = feature_loss(fmap_f_r, fmap_f_g)
+        loss_fm_s = feature_loss(fmap_s_r, fmap_s_g)
+        loss_gen_f, losses_gen_f = generator_loss(y_df_hat_g)
+        loss_gen_s, losses_gen_s = generator_loss(y_ds_hat_g)
+        loss_gen_all = loss_gen_s + loss_gen_f + loss_fm_s + loss_fm_f + loss_mel
+
+        self.manual_backward(loss_gen_all)
+        optim_d.step()
+
+    def validation_step(self, in_: MelDatasetOutput) -> torch.Tensor:
+        mel_args = self.args.mel_args
+        y_mel, y = in_
+        x: Wav2Vec2BaseModelOutput = self.wavlm(
+            torchaudio.functional.resample(y, 48000, 16000)
+        )
+        y_g_hat = self.generator(x.extract_features.permute(0, 2, 1))
+        y_g_hat_mel = mel_spectrogram(
+            y_g_hat.squeeze(1),
+            mel_args.n_fft,
+            mel_args.num_mels,
+            mel_args.sampling_rate,
+            mel_args.hop_size,
+            mel_args.win_size,
+            mel_args.fmin,
+            mel_args.fmax,
+        )
+        val_loss = torch.nn.functional.l1_loss(y_mel, y_g_hat_mel)
+        self.log("val_loss", val_loss)
+        return val_loss
 
     def configure_optimizers(
         self

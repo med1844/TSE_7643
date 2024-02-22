@@ -178,7 +178,11 @@ class Generator(nn.Module):
         self.num_kernels = len(args.resblock_kernel_sizes)
         self.num_upsamples = len(args.upsample_rates)
         self.conv_pre = nn.Conv1d(
-            args.initial_channel, args.upsample_initial_channel, 7, 1, padding=3
+            args.initial_channel,
+            args.upsample_initial_channel,
+            kernel_size=7,
+            stride=1,
+            padding=3,
         )
 
         self.ups = nn.ModuleList()
