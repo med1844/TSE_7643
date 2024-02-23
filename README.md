@@ -40,6 +40,6 @@ After this is finished, execute:
 
 ```bash
 cd ..
-poetry run python train.py -c configs/v0.json -p datasets/genshin-voice-v3.5-mandarin/data/
+poetry run python main.py -c configs/v0.json -p datasets/genshin-voice-v3.5-mandarin/data/
 ```
 
