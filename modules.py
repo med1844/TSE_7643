@@ -1,4 +1,5 @@
 from typing import List, Tuple
+from audio_commons import plot_spectrogram
 import lightning as ln
 from models.generator import Generator, GeneratorArgs
 from models.mpd import MultiPeriodDiscriminator
@@ -88,6 +89,7 @@ class SpeechReconstructorModule(ln.LightningModule):
         loss_disc_s, _, _ = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
 
         loss_disc_all = loss_disc_s + loss_disc_f
+        self.log("train_loss_d", loss_disc_all)
         self.manual_backward(loss_disc_all)
         optim_d.step()
 
@@ -103,6 +105,12 @@ class SpeechReconstructorModule(ln.LightningModule):
         loss_gen_s, losses_gen_s = generator_loss(y_ds_hat_g)
         loss_gen_all = loss_gen_s + loss_gen_f + loss_fm_s + loss_fm_f + loss_mel
 
+        self.log("train_loss_g", loss_gen_all)
+        self.log("train_loss_gen_s", loss_gen_s)
+        self.log("train_loss_gen_f", loss_gen_f)
+        self.log("train_loss_fm_s", loss_fm_s)
+        self.log("train_loss_fm_f", loss_fm_f)
+        self.log("train_loss_mel", loss_mel)
         self.manual_backward(loss_gen_all)
         optim_d.step()
 
@@ -125,6 +133,13 @@ class SpeechReconstructorModule(ln.LightningModule):
         )
         val_loss = torch.nn.functional.l1_loss(y_mel, y_g_hat_mel)
         self.log("val_loss", val_loss)
+
+        self.logger.log_image("y_mel", [plot_spectrogram(y_mel.cpu().numpy()[0])])
+        self.logger.log_image(
+            "y_g_hat_mel",
+            [plot_spectrogram(y_g_hat_mel.cpu().numpy()[0])],
+        )
+
         return val_loss
 
     def configure_optimizers(

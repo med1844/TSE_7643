@@ -3,11 +3,13 @@ from models.generator import GeneratorArgs
 from dataset import (
     MelArgs,
     SpeechDataset,
+    RandomDataset,
     GenshinDataset,
     MelDataset,
 )
 from lightning import Trainer
-from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
 import torch.utils.data
 from dataclasses import dataclass
@@ -77,6 +79,7 @@ def train(args: TrainArgs, parquets_folder: str):
     dataset = MelDataset.from_speech_dataset(
         SpeechDataset.from_speaker_audio_provider(
             GenshinDataset.from_parquets(parquets_folder)
+            # RandomDataset(30, (3 * 48000, 6 * 48000))
         ),
         args.sr_args.mel_args,
     )
@@ -104,7 +107,7 @@ def train(args: TrainArgs, parquets_folder: str):
         mode="min",
     )
     trainer = Trainer(
-        logger=TensorBoardLogger("tb_logs", name=args.exp_name),
+        logger=WandbLogger(project=args.exp_name),
         callbacks=[checkpoint_callback],
         max_epochs=args.epochs,
     )
