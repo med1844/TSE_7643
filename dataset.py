@@ -57,32 +57,58 @@ class GenshinDataset(SpeakerAudioProvider):
             if name:
                 data.setdefault(name, []).append(
                     torchaudio.functional.resample(
-                        *torchaudio.load(io.BytesIO(audio), backend="ffmpeg"), 48000
+                        *torchaudio.load(io.BytesIO(audio)), 48000
                     )  # we know the data is 48000, but just to ensure
                 )
         return data
+
+    # @classmethod
+    # def from_parquets(cls, parquet_folder: str) -> "GenshinDataset":
+    #     # after `git clone https://huggingface.co/datasets/hanamizuki-ai/genshin-voice-v3.5-mandarin`
+    #     # fed the folder path to the git clone result into this function
+    #     # NOTE this might take a long time to read (1-2 min on mech disk)
+    #     dfs = [
+    #         pd.read_parquet(filename)
+    #         for filename in tqdm(
+    #             glob(os.path.join(parquet_folder, "*.parquet"))[:25],
+    #             desc="parquet file",
+    #         )
+    #     ]
+
+    #     with ProcessPoolExecutor(max_workers=32) as executor:
+    #         results = list(
+    #             tqdm(
+    #                 executor.map(cls.process_df, dfs),
+    #                 total=len(dfs),
+    #                 desc="Processing files",
+    #             )
+    #         )
+    #         return cls(reduce(or_, results))
 
     @classmethod
     def from_parquets(cls, parquet_folder: str) -> "GenshinDataset":
         # after `git clone https://huggingface.co/datasets/hanamizuki-ai/genshin-voice-v3.5-mandarin`
         # fed the folder path to the git clone result into this function
         # NOTE this might take a long time to read (1-2 min on mech disk)
-        dfs = [
-            pd.read_parquet(filename)
-            for filename in tqdm(
-                glob(os.path.join(parquet_folder, "*.parquet")), desc="parquet file"
-            )
-        ]
+        def process_df(df: pd.DataFrame, data: Dict[str, List[torch.Tensor]]):
+            # WARNING you should not call this method and view it as private
+            for _i, row in df.iterrows():
+                audio: bytes = row["audio"]["bytes"]
+                name: str = row["npcName"]
+                if name:
+                    data.setdefault(name, []).append(
+                        read_wav_at_fs(48000, io.BytesIO(audio))
+                    )
+            return data
 
-        with ProcessPoolExecutor() as executor:
-            results = list(
-                tqdm(
-                    executor.map(cls.process_df, dfs),
-                    total=len(dfs),
-                    desc="Processing files",
-                )
-            )
-            return cls(reduce(or_, results))
+        results = {}
+        for filename in tqdm(
+            glob(os.path.join(parquet_folder, "*.parquet"))[:25],
+            desc="parquet file",
+        ):
+            df = pd.read_parquet(filename)
+            process_df(df, results)
+        return cls(results)
 
 
 class SpeechDataset(Dataset):
@@ -288,11 +314,7 @@ MelDatasetOutput = Tuple[torch.Tensor, torch.Tensor]
 
 class MelDataset(torch.utils.data.Dataset):
     def __init__(self, audios: List[torch.Tensor], args: MelArgs):
-        self.audios = [
-            a
-            for a in audios
-            if 5 * args.sampling_rate <= a.shape[-1] < 15 * args.sampling_rate
-        ]
+        self.audios = [a for a in audios if 3 * args.sampling_rate <= a.shape[-1]]
         self.segment_size = args.segment_size
         self.sampling_rate = args.sampling_rate
         self.n_fft = args.n_fft

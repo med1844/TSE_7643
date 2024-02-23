@@ -16,6 +16,9 @@ torch = "^2.2.1"
 torchaudio = "^2.2.1"
 tqdm = "^4.66.2"
 transformers = "^4.38.1"
+pyarrow = "^15.0.0"
+fastparquet = "^2024.2.0"
+tensorboard = "^2.16.2"
 
 [build-system]
 requires = ["poetry-core"]
