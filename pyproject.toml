@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "tse-7643"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+click = "^8.1.7"
+librosa = "^0.10.1"
+lightning = "^2.2.0.post0"
+numpy = "^1.26.4"
+pandas = "^2.2.0"
+torch = "^2.2.1"
+torchaudio = "^2.2.1"
+tqdm = "^4.66.2"
+transformers = "^4.38.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
