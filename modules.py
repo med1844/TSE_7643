@@ -8,20 +8,38 @@ from transformers.modeling_outputs import Wav2Vec2BaseModelOutput
 import torch
 import itertools
 from dataclasses import dataclass
-from serde import serde
 from losses import feature_loss, discriminator_loss, generator_loss
 from dataset import MelDatasetOutput, mel_spectrogram, MelArgs
 import torchaudio
+from traits import SerdeJson, Json
 
 
-@serde
 @dataclass
-class SpeechReconstructorArgs:
+class SpeechReconstructorArgs(SerdeJson):
     learning_rate: float
     generator_args: GeneratorArgs
     mel_args: MelArgs
-    adam_beta = (0.9, 0.99)
-    lr_decay = 0.999
+    adam_beta: Tuple[float, float] = (0.9, 0.99)
+    lr_decay: float = 0.999
+
+    def to_json(self) -> Json:
+        return {
+            "learning_rate": self.learning_rate,
+            "generator_args": self.generator_args.to_json(),
+            "mel_args": self.mel_args.to_json(),
+            "adam_beta": self.adam_beta,
+            "lr_decay": self.lr_decay,
+        }
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "SpeechReconstructorArgs":
+        return cls(
+            learning_rate=obj["learning_rate"],
+            generator_args=GeneratorArgs.from_json(obj["generator_args"]),
+            mel_args=MelArgs.from_json(obj["mel_args"]),
+            adam_beta=tuple(obj["adam_beta"]),
+            lr_decay=obj["lr_decay"],
+        )
 
 
 class SpeechReconstructorModule(ln.LightningModule):

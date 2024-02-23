@@ -1,0 +1,62 @@
+{
+    "exp_name": "speech_reconstruction",
+    "epochs": 10,
+    "batch_size": 16,
+    "sr_args": {
+        "learning_rate": 0.0002,
+        "generator_args": {
+            "initial_channel": 512,
+            "resblock": 2,
+            "resblock_kernel_sizes": [
+                3,
+                5,
+                7
+            ],
+            "resblock_dilation_sizes": [
+                [
+                    1,
+                    2
+                ],
+                [
+                    2,
+                    6
+                ],
+                [
+                    3,
+                    12
+                ]
+            ],
+            "upsample_rates": [
+                8,
+                8,
+                4,
+                2,
+                2
+            ],
+            "upsample_initial_channel": 512,
+            "upsample_kernel_sizes": [
+                16,
+                16,
+                8,
+                2,
+                2
+            ],
+            "gin_channels": 0
+        },
+        "mel_args": {
+            "segment_size": 16384,
+            "n_fft": 1024,
+            "num_mels": 80,
+            "hop_size": 256,
+            "win_size": 1024,
+            "sampling_rate": 48000,
+            "fmin": 0,
+            "fmax": null
+        },
+        "adam_beta": [
+            0.9,
+            0.99
+        ],
+        "lr_decay": 0.999
+    }
+}

@@ -16,6 +16,7 @@ from librosa.filters import mel as librosa_mel_fn
 import random
 import torch.utils.data
 from dataclasses import dataclass
+from traits import SerdeJson, Json
 from audio_commons import read_wav_at_fs
 
 
@@ -246,7 +247,7 @@ def mel_spectrogram(
 
 
 @dataclass
-class MelArgs:
+class MelArgs(SerdeJson):
     segment_size: int
     n_fft: int
     num_mels: int
@@ -255,6 +256,31 @@ class MelArgs:
     sampling_rate: int
     fmin: int
     fmax: Optional[int] = None
+
+    def to_json(self) -> Json:
+        return {
+            "segment_size": self.segment_size,
+            "n_fft": self.n_fft,
+            "num_mels": self.num_mels,
+            "hop_size": self.hop_size,
+            "win_size": self.win_size,
+            "sampling_rate": self.sampling_rate,
+            "fmin": self.fmin,
+            "fmax": self.fmax,
+        }
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "MelArgs":
+        return cls(
+            segment_size=obj["segment_size"],
+            n_fft=obj["n_fft"],
+            num_mels=obj["num_mels"],
+            hop_size=obj["hop_size"],
+            win_size=obj["win_size"],
+            sampling_rate=obj["sampling_rate"],
+            fmin=obj["fmin"],
+            fmax=obj["fmax"],
+        )
 
 
 MelDatasetOutput = Tuple[torch.Tensor, torch.Tensor]

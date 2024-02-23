@@ -3,13 +3,13 @@
 # added type annotation, copied dependency from other files
 # modified a little bit to make code analyzer happy
 
-from typing import Collection, Optional
+from typing import List, Literal, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm
 from dataclasses import dataclass
-from serde import serde
+from traits import SerdeJson, Json
 
 from .utils import init_weights, get_padding, LRELU_SLOPE
 
@@ -156,17 +156,41 @@ class ResBlock2(nn.Module):
             remove_weight_norm(l)
 
 
-@serde
 @dataclass
-class GeneratorArgs:
+class GeneratorArgs(SerdeJson):
     initial_channel: int
-    resblock: type[ResBlock1] | type[ResBlock2]
-    resblock_kernel_sizes: Collection[int]
-    resblock_dilation_sizes: Collection[Collection[int]]
-    upsample_rates: Collection[int]
+    resblock: Literal[1, 2]
+    resblock_kernel_sizes: List[int]
+    resblock_dilation_sizes: List[List[int]]
+    upsample_rates: List[int]
     upsample_initial_channel: int
-    upsample_kernel_sizes: Collection[int]
-    gin_channels = 0
+    upsample_kernel_sizes: List[int]
+    gin_channels: int = 0
+
+    def to_json(self) -> Json:
+        return {
+            "initial_channel": self.initial_channel,
+            "resblock": self.resblock,
+            "resblock_kernel_sizes": self.resblock_kernel_sizes,
+            "resblock_dilation_sizes": self.resblock_dilation_sizes,
+            "upsample_rates": self.upsample_rates,
+            "upsample_initial_channel": self.upsample_initial_channel,
+            "upsample_kernel_sizes": self.upsample_kernel_sizes,
+            "gin_channels": self.gin_channels,
+        }
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "GeneratorArgs":
+        return cls(
+            initial_channel=obj["initial_channel"],
+            resblock=obj["resblock"],
+            resblock_kernel_sizes=obj["resblock_kernel_sizes"],
+            resblock_dilation_sizes=obj["resblock_dilation_sizes"],
+            upsample_rates=obj["upsample_rates"],
+            upsample_initial_channel=obj["upsample_initial_channel"],
+            upsample_kernel_sizes=obj["upsample_kernel_sizes"],
+            gin_channels=obj["gin_channels"],
+        )
 
 
 class Generator(nn.Module):
@@ -201,13 +225,14 @@ class Generator(nn.Module):
                 )
             )
 
+        resblock = ResBlock1 if args.resblock == 1 else ResBlock2
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
             ch = args.upsample_initial_channel >> (i + 1)
             for j, (k, d) in enumerate(
                 zip(args.resblock_kernel_sizes, args.resblock_dilation_sizes)
             ):
-                self.resblocks.append(args.resblock(ch, k, d))
+                self.resblocks.append(resblock(ch, k, d))
 
         ch = args.upsample_initial_channel // (1 << len(self.ups))
         self.conv_post = nn.Conv1d(ch, 1, 7, 1, padding=3, bias=False)
