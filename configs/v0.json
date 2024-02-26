@@ -44,11 +44,11 @@
             "gin_channels": 0
         },
         "mel_args": {
-            "segment_size": 16384,
-            "n_fft": 1024,
-            "num_mels": 80,
-            "hop_size": 256,
-            "win_size": 1024,
+            "segment_size": 32768,
+            "n_fft": 2048,
+            "num_mels": 128,
+            "hop_size": 512,
+            "win_size": 2048,
             "sampling_rate": 48000,
             "fmin": 0,
             "fmax": null

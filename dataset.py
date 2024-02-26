@@ -119,7 +119,7 @@ class GenshinDataset(SpeakerAudioProvider):
 
         results = {}
         for filename in tqdm(
-            glob(os.path.join(parquet_folder, "*.parquet"))[:5],
+            glob(os.path.join(parquet_folder, "*.parquet"))[:25],
             desc="parquet file",
         ):
             df = pd.read_parquet(filename)
@@ -139,6 +139,11 @@ class SpeechDataset(Dataset):
 
     def __getitem__(self, index: int) -> torch.Tensor:
         return self.audios[index]
+
+    def get_summary(self) -> str:
+        return "total length: %ds" % sum(
+            map(lambda a: a.shape[-1] / 48000, self.audios)
+        )
 
     @classmethod
     def from_folder(cls, folder_path: str, target_fs=48000) -> "SpeechDataset":

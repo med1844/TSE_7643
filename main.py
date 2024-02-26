@@ -63,11 +63,11 @@ class TrainArgs(SerdeJson):
                     upsample_kernel_sizes=[16, 16, 8, 2, 2],
                 ),
                 mel_args=MelArgs(
-                    segment_size=16384,
-                    n_fft=1024,
-                    num_mels=80,
-                    hop_size=256,
-                    win_size=1024,
+                    segment_size=32768,
+                    n_fft=2048,
+                    num_mels=128,
+                    hop_size=512,
+                    win_size=2048,
                     sampling_rate=48000,
                     fmin=0,
                 ),
@@ -76,11 +76,14 @@ class TrainArgs(SerdeJson):
 
 
 def train(args: TrainArgs, parquets_folder: str):
+    speech_dataset = SpeechDataset.from_speaker_audio_provider(
+        # GenshinDataset.from_parquets(parquets_folder)
+        RandomDataset(100, (3 * 48000, 6 * 48000))
+    )
+    print(speech_dataset.get_summary())
+
     dataset = MelDataset.from_speech_dataset(
-        SpeechDataset.from_speaker_audio_provider(
-            GenshinDataset.from_parquets(parquets_folder)
-            # RandomDataset(30, (3 * 48000, 6 * 48000))
-        ),
+        speech_dataset,
         args.sr_args.mel_args,
     )
     train_size = int(0.8 * len(dataset))
@@ -108,6 +111,7 @@ def train(args: TrainArgs, parquets_folder: str):
     )
     trainer = Trainer(
         logger=WandbLogger(project=args.exp_name),
+        # logger=TensorBoardLogger("tb_logs", name=args.exp_name),
         callbacks=[checkpoint_callback],
         max_epochs=args.epochs,
     )

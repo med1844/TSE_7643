@@ -68,6 +68,7 @@ class SpeechReconstructorModule(ln.LightningModule):
         y_g_hat = self.generator(
             x.extract_features.permute(0, 2, 1)  # (B, T, D) -> (B, D, T), D = 512
         )
+        y_g_hat = y_g_hat[..., : y.shape[-1]]
         y_g_hat_mel = mel_spectrogram(
             y_g_hat.squeeze(1),
             mel_args.n_fft,
@@ -121,6 +122,7 @@ class SpeechReconstructorModule(ln.LightningModule):
             torchaudio.functional.resample(y, 48000, 16000)
         )
         y_g_hat = self.generator(x.extract_features.permute(0, 2, 1))
+        y_g_hat = y_g_hat[..., : y.shape[-1]]
         y_g_hat_mel = mel_spectrogram(
             y_g_hat.squeeze(1),
             mel_args.n_fft,
