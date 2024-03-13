@@ -1,11 +1,10 @@
 from typing import BinaryIO, Union, Optional
 import torch
+import torch.nn as nn
 import torchaudio
 from PIL import Image
 import matplotlib.pyplot as plt
 import io
-import librosa.display
-import librosa
 from librosa.filters import mel as librosa_mel_fn
 import numpy as np
 
@@ -104,10 +103,8 @@ def mel_spectrogram(
         pad_mode="reflect",
         normalized=False,
         onesided=True,
-        return_complex=False,
-    )
-
-    spec = torch.sqrt(spec.pow(2).sum(-1) + (1e-9))
+        return_complex=True,
+    ).abs()
 
     spec = torch.matmul(mel_basis[str(fmax) + "_" + str(y.device)], spec)
     spec = spectral_normalize_torch(spec)
@@ -115,19 +112,47 @@ def mel_spectrogram(
     return spec
 
 
+def get_mel_torch(
+    y: torch.Tensor,
+    sr: int,
+    num_mel=128,
+    hop_size=512,
+    win_size=2048,
+    fft_size=2048,
+    fmin=40,
+    fmax=16000,
+):
+    with torch.no_grad():
+        mel_torch = (
+            mel_spectrogram(
+                y.unsqueeze(0),
+                fft_size,
+                num_mel,
+                sr,
+                hop_size,
+                win_size,
+                fmin,
+                fmax,
+            )
+            .squeeze(0)
+            .T
+        )
+        return mel_torch.cpu().numpy()
+
+
 if __name__ == "__main__":
     import sys
 
     img = plot_spectrogram(
         mel_spectrogram(
-            read_wav_at_fs(48000, sys.argv[1]),
-            1024,
-            80,
-            48000,
-            256,
-            1024,
-            0,
-            None,
+            read_wav_at_fs(44100, sys.argv[1]),
+            2048,
+            128,
+            44100,
+            512,
+            2048,
+            40,
+            16000,
         )
         .numpy()
         .squeeze()

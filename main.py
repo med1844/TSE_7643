@@ -4,11 +4,9 @@ from dataset import (
     MelArgs,
     SpeechDataset,
     RandomDataset,
-    GenshinDataset,
     MelDataset,
 )
 from lightning import Trainer
-from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
 import torch.utils.data
@@ -54,7 +52,7 @@ class TrainArgs(SerdeJson):
                 generator_args=GeneratorArgs(
                     # https://github.com/jik876/hifi-gan/blob/master/config_v3.json
                     # https://github.com/fishaudio/Bert-VITS2/blob/master/configs/config.json#L938
-                    initial_channel=512,  # the extracted feature dim of WavLM
+                    num_mels=512,  # the extracted feature dim of WavLM
                     resblock=2,
                     resblock_kernel_sizes=[3, 5, 7],
                     resblock_dilation_sizes=[[1, 2], [2, 6], [3, 12]],
