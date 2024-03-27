@@ -1,4 +1,4 @@
-from typing import BinaryIO, Union, Optional
+from typing import BinaryIO, Tuple, Union, Optional, List
 import torch
 import torch.nn as nn
 import torchaudio
@@ -7,15 +7,19 @@ import matplotlib.pyplot as plt
 import io
 from librosa.filters import mel as librosa_mel_fn
 import numpy as np
+import pyloudnorm
 
 
-def read_wav_at_fs(target_fs: int, filename: Union[BinaryIO, str]) -> torch.Tensor:
+def read_wav_at_fs(
+    target_fs: Optional[int], filename: Union[BinaryIO, str]
+) -> Tuple[torch.Tensor, int]:
     y, fs = torchaudio.load(filename)
     if y.shape[0] > 1:
         y = y.mean(dim=0, keepdim=True)
-    if fs != target_fs:
+    if target_fs is not None and fs != target_fs:
         y = torchaudio.functional.resample(y, fs, target_fs)
-    return y
+        fs = target_fs
+    return y, fs
 
 
 def plot_spectrogram(spectrogram: np.ndarray):
@@ -138,6 +142,34 @@ def get_mel_torch(
             .T
         )
         return mel_torch.cpu().numpy()
+
+
+def normalize_loudness(y: np.ndarray, fs: int, target_loudness=-30) -> np.ndarray:
+    meter = pyloudnorm.Meter(fs)
+    loudness = meter.integrated_loudness(y)
+    normalized = pyloudnorm.normalize.loudness(y, loudness, target_loudness)
+    return normalized
+
+
+def normalize_loudness_torch(
+    y: torch.Tensor, fs: int, target_loudness=-30
+) -> torch.Tensor:
+    return torch.tensor(normalize_loudness(y.numpy().T, fs, target_loudness).T)
+
+
+def pad_seq_n_stack(wavs: List[torch.Tensor], target_len: int) -> torch.Tensor:
+    """
+    Args:
+        wavs: list of 1 x T Tensor, T may vary.
+        target_len: assert to be max T in that varying 1 x T tensor list.
+    Returns:
+        result: B x target_len Tensor
+    """
+    padded_wavs = [
+        torch.cat([wav, torch.zeros(target_len - len(wav))])
+        for wav in map(lambda x: x[0], wavs)
+    ]
+    return torch.stack(padded_wavs)
 
 
 if __name__ == "__main__":

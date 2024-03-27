@@ -13,12 +13,7 @@ from pitch_extraction import get_pitch
 if __name__ == "__main__":
     import sys
 
-    with open(
-        "weights/nsf_hifigan_44.1k_hop512_128bin_2024.02/config.json",
-        "r",
-        encoding="utf-8",
-    ) as f:
-        model = Generator(GeneratorArgs.from_json(json.load(f)))
+    model = Generator(GeneratorArgs.default())
     state_dict = torch.load(
         "weights/nsf_hifigan_44.1k_hop512_128bin_2024.02/model.ckpt"
     )["generator"]

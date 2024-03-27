@@ -1,5 +1,5 @@
 import torch
-from generator import Generator
+from models.generator import Generator
 
 
 def spec2wav(model: Generator, mel: torch.Tensor, f0: torch.Tensor):

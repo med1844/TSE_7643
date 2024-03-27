@@ -5,6 +5,8 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 import numpy
+from dataclasses import dataclass
+from traits import SerdeJson, Json
 
 
 class RelativePositionalEncoding(nn.Module):
@@ -195,7 +197,7 @@ class ConformerBlock(nn.Module):
         causal: bool = False,
     ) -> None:
         """Construct an EncoderLayer object."""
-        super(ConformerBlock, self).__init__()
+        super().__init__()
         self.feed_forward_in = FeedForward(d_model, d_ffn, dropout_rate)
         self.self_attn = AttnBiasMHA(n_head, d_model, dropout_rate)
         self.conv = ConvModule(d_model, kernel_size, dropout_rate, causal=causal)
@@ -222,3 +224,64 @@ class ConformerBlock(nn.Module):
         out = self.layer_norm(x)
 
         return out
+
+
+class ConformerEncoder(nn.Module):
+    """Conformer Encoder https://arxiv.org/abs/2005.08100"""
+
+    def __init__(
+        self,
+        idim: int,
+        attention_dim=256,
+        attention_heads=4,
+        linear_units=1024,
+        num_blocks=16,
+        kernel_size=33,
+        dropout_rate=0.1,
+        causal=False,
+        relative_pos_emb=True,
+    ):
+        super(ConformerEncoder, self).__init__()
+
+        self.embed = torch.nn.Sequential(
+            torch.nn.Linear(idim, attention_dim),
+            torch.nn.LayerNorm(attention_dim),
+            torch.nn.Dropout(dropout_rate),
+            torch.nn.ReLU(),
+        )
+
+        if relative_pos_emb:
+            self.pos_emb = RelativePositionalEncoding(
+                attention_dim // attention_heads, 1000, False
+            )
+        else:
+            self.pos_emb = None
+
+        self.encoders = torch.nn.Sequential(
+            *[
+                ConformerBlock(
+                    attention_dim,
+                    attention_heads,
+                    linear_units,
+                    kernel_size,
+                    dropout_rate,
+                    causal=causal,
+                )
+                for _ in range(num_blocks)
+            ]
+        )
+
+    def forward(self, xs: torch.Tensor, masks: Optional[torch.Tensor]):
+        xs = self.embed(xs)
+
+        if self.pos_emb is not None:
+            x_len = xs.shape[1]
+            pos_seq = torch.arange(0, x_len).long().to(xs.device)
+            pos_seq = pos_seq[:, None] - pos_seq[None, :]
+            pos_k, _ = self.pos_emb(pos_seq)
+        else:
+            pos_k = None
+        for layer in self.encoders:
+            xs = layer(xs, pos_k, masks)
+
+        return xs

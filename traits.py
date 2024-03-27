@@ -11,5 +11,5 @@ class SerdeJson:
 
     @classmethod
     @abstractmethod
-    def from_json(cls, obj: Json):
+    def from_json(cls, obj: Json) -> Any:
         pass

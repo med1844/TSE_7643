@@ -1,4 +1,5 @@
-from modules import SpeechReconstructorModule, SpeechReconstructorArgs
+from models.conformer import ConformerBlockArgs
+from modules import TSEModule, TSEArgs
 from models.generator import GeneratorArgs
 from dataset import (
     MelArgs,
@@ -22,7 +23,7 @@ class TrainArgs(SerdeJson):
     exp_name: str
     epochs: int
     batch_size: int
-    sr_args: SpeechReconstructorArgs
+    sr_args: TSEArgs
 
     def to_json(self) -> Json:
         return {
@@ -38,7 +39,7 @@ class TrainArgs(SerdeJson):
             exp_name=obj["exp_name"],
             epochs=obj["epochs"],
             batch_size=obj["batch_size"],
-            sr_args=SpeechReconstructorArgs.from_json(obj["sr_args"]),
+            sr_args=TSEArgs.from_json(obj["sr_args"]),
         )
 
     @classmethod
@@ -47,28 +48,22 @@ class TrainArgs(SerdeJson):
             exp_name="speech_reconstruction",
             epochs=10,
             batch_size=16,
-            sr_args=SpeechReconstructorArgs(
+            sr_args=TSEArgs(
                 learning_rate=0.0002,
-                generator_args=GeneratorArgs(
-                    # https://github.com/jik876/hifi-gan/blob/master/config_v3.json
-                    # https://github.com/fishaudio/Bert-VITS2/blob/master/configs/config.json#L938
-                    num_mels=512,  # the extracted feature dim of WavLM
-                    resblock=2,
-                    resblock_kernel_sizes=[3, 5, 7],
-                    resblock_dilation_sizes=[[1, 2], [2, 6], [3, 12]],
-                    upsample_rates=[8, 8, 4, 2, 2],
-                    upsample_initial_channel=512,
-                    upsample_kernel_sizes=[16, 16, 8, 2, 2],
-                ),
                 mel_args=MelArgs(
                     segment_size=32768,
                     n_fft=2048,
                     num_mels=128,
                     hop_size=512,
                     win_size=2048,
-                    sampling_rate=48000,
-                    fmin=0,
+                    sampling_rate=44100,
+                    fmin=40,
+                    fmax=16000,
                 ),
+                conformer_block_args=ConformerBlockArgs(
+                    d_model=256, n_head=4, d_ffn=1024, kernel_size=33, dropout_rate=0.1
+                ),
+                num_conformer_blocks=16,
             ),
         )
 
@@ -99,7 +94,7 @@ def train(args: TrainArgs, parquets_folder: str):
         batch_size=args.batch_size,
     )
 
-    sr_module = SpeechReconstructorModule(args.sr_args)
+    sr_module = TSEModule(args.sr_args)
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         dirpath="exp/%s/checkpoints/" % args.exp_name,
