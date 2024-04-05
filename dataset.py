@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from traits import SerdeJson, Json
 from audio_commons import read_wav_at_fs, mel_spectrogram, normalize_loudness_torch
 from pathlib import Path
+import pickle
 
 
 T = TypeVar("T")
@@ -149,9 +150,35 @@ class TSEItem:
     def __iter__(self) -> Iterator[torch.Tensor]:
         return iter((self.mix, self.ref, self.y))
 
+    @classmethod
+    def from_file(cls, path: Path):
+        with open(path, "rb") as f:
+            (mix, ref, y) = pickle.load(f)
+            return cls(mix, ref, y)
+
+    def to_file(self, path: Path):
+        with open(path, "wb") as f:
+            pickle.dump((self.mix, self.ref, self.y), f)
+
+
+@dataclass
+class LoadedTSEItem(LazyLoadable):
+    item: TSEItem
+
+    def load(self) -> TSEItem:
+        return self.item
+
+
+@dataclass
+class LazyLoadTSEItem(LazyLoadable):
+    path: str
+
+    def load(self) -> TSEItem:
+        return super().load()
+
 
 class TSEDataset(Dataset):
-    def __init__(self, items: List[TSEItem]) -> None:
+    def __init__(self, items: List[LazyLoadable[TSEItem]]) -> None:
         super().__init__()
         self.items = items
 
@@ -159,12 +186,10 @@ class TSEDataset(Dataset):
         return len(self.items)
 
     def __getitem__(self, index: int) -> TSEItem:
-        return self.items[index]
+        return self.items[index].load()
 
     def to_folder(self, p: Path):
         if p.exists() and p.is_dir():
-            for v in ("mix", "ref", "y"):
-                (p / v).mkdir(exist_ok=True)
             for i, (mix, ref, y) in enumerate(self.items):
                 for k, v in zip((mix, ref, y), ("mix", "ref", "y")):
                     torch.save(k, p / v / ("%d.pt" % i))
@@ -173,11 +198,7 @@ class TSEDataset(Dataset):
 
     @classmethod
     def from_folder(cls, p: Path) -> "TSEDataset":
-        if (
-            p.exists()
-            and p.is_dir()
-            and all((p / v).exists() and (p / v).is_dir() for v in ("mix", "ref", "y"))
-        ):
+        if p.exists() and p.is_dir():
             items = []
             for mix_file, ref_file, y_file in zip(
                 *(glob(str(p / v / "*.pt")) for v in ("mix", "ref", "y"))
