@@ -13,6 +13,7 @@ import torch.utils.data
 from dataclasses import dataclass
 from traits import SerdeJson, Json
 from audio_commons import read_wav_at_fs, mel_spectrogram, normalize_loudness_torch
+from pathlib import Path
 
 
 T = TypeVar("T")
@@ -119,77 +120,6 @@ class TSEWavDataset(SpeakerAudioProvider):
         return self.data.get(name, [])
 
 
-class GenshinDataset(SpeakerAudioProvider):
-    def __init__(self, data: Dict[str, List[LoadedAudio]]) -> None:
-        self.data = data
-
-    def get_speaker_list(self) -> Iterable[str]:
-        return self.data.keys()
-
-    def get_speaker_files(self, name: str) -> Iterable[LoadedAudio]:
-        return self.data.get(name, [])
-
-    @classmethod
-    def from_parquets(cls, parquet_folder: str) -> "GenshinDataset":
-        # after `git clone https://huggingface.co/datasets/hanamizuki-ai/genshin-voice-v3.5-mandarin`
-        # fed the folder path to the git clone result into this function
-        # NOTE this might take a long time to read (1-2 min on mech disk)
-        def process_df(df: pd.DataFrame, data: Dict[str, List[LoadedAudio]]):
-            for _i, row in df.iterrows():
-                audio: bytes = row["audio"]["bytes"]
-                name: str = row["npcName"]
-                if name:
-                    resampled_wav, fs = read_wav_at_fs(44100, io.BytesIO(audio))
-                    if resampled_wav.shape[-1] >= fs * 3:
-                        data.setdefault(name, []).append(
-                            LoadedAudio(Audio(wav=resampled_wav, fs=fs))
-                        )
-
-        results = {}
-        for filename in tqdm(
-            glob(os.path.join(parquet_folder, "*.parquet"))[:2],
-            desc="parquet file",
-        ):
-            df = pd.read_parquet(filename)
-            process_df(df, results)
-        return cls(results)
-
-
-class SpeechDataset(Dataset):
-    """This dataset stores a bunch of speech, regardless of speaker"""
-
-    def __init__(self, audios: List[LazyLoadable[Audio]]) -> None:
-        super().__init__()
-        self.audios = audios
-
-    def __len__(self) -> int:
-        return len(self.audios)
-
-    def __getitem__(self, index: int) -> Audio:
-        return self.audios[index].load()
-
-    def get_summary(self) -> str:
-        return "total length: %ds" % sum(map(lambda a: a.load().len_in_s, self.audios))
-
-    @classmethod
-    def from_folder(cls, folder_path: str, target_fs=48000) -> "SpeechDataset":
-        return cls(
-            list(
-                LoadedAudio(Audio(*read_wav_at_fs(target_fs, filename)))
-                for filename in glob(os.path.join(folder_path, "*.wav"))
-            )
-        )
-
-    @classmethod
-    def from_speaker_audio_provider(
-        cls, provider: SpeakerAudioProvider
-    ) -> "SpeechDataset":
-        audios = []
-        for spk in provider.get_speaker_list():
-            audios.extend(list(provider.get_speaker_files(spk)))
-        return cls(audios)
-
-
 def pad_seq_n_stack(wavs: Iterable[torch.Tensor], target_len: int) -> torch.Tensor:
     """
     Args:
@@ -203,28 +133,6 @@ def pad_seq_n_stack(wavs: Iterable[torch.Tensor], target_len: int) -> torch.Tens
         for wav in map(lambda x: x[0], wavs)
     ]
     return torch.stack(padded_wavs)
-
-
-def speech_dataloader_collate_fn(batch: Iterable[torch.Tensor]) -> torch.Tensor:
-    """
-    Args:
-        batch: list of audio tensor, i.e. List[SpeechDataset.__getitem__ return type]
-               each item has size [1 x T]
-    Returns:
-        (
-            batch_padded_wav: B x max(T), Tensor
-        )
-    """
-    pad_length = max(mixed.shape[-1] for mixed, _ in batch)
-    return pad_seq_n_stack(batch, pad_length)
-
-
-class SpeechDataLoader(DataLoader):
-    def __init__(self, *args, **kwargs):
-        super().__init__(collate_fn=speech_dataloader_collate_fn, *args, **kwargs)
-
-
-T = TypeVar("T")
 
 
 @dataclass
@@ -253,6 +161,36 @@ class TSEDataset(Dataset):
     def __getitem__(self, index: int) -> TSEItem:
         return self.items[index]
 
+    def to_folder(self, p: Path):
+        if p.exists() and p.is_dir():
+            for v in ("mix", "ref", "y"):
+                (p / v).mkdir(exist_ok=True)
+            for i, (mix, ref, y) in enumerate(self.items):
+                for k, v in zip((mix, ref, y), ("mix", "ref", "y")):
+                    torch.save(k, p / v / ("%d.pt" % i))
+        else:
+            raise ValueError("%s doesn't exist or is not a folder" % p)
+
+    @classmethod
+    def from_folder(cls, p: Path) -> "TSEDataset":
+        if (
+            p.exists()
+            and p.is_dir()
+            and all((p / v).exists() and (p / v).is_dir() for v in ("mix", "ref", "y"))
+        ):
+            items = []
+            for mix_file, ref_file, y_file in zip(
+                *(glob(str(p / v / "*.pt")) for v in ("mix", "ref", "y"))
+            ):
+                mix, ref, y = map(torch.load, (mix_file, ref_file, y_file))
+                items.append(TSEItem(mix, ref, y))
+            return cls(items)
+        else:
+            raise ValueError(
+                "%s doesn't exist, or is not a folder, or %s/mix %s/ref %s/y doesn't all exist"
+                % (p, p, p, p)
+            )
+
 
 def tse_item_collate_fn(
     batch: List[TSEItem]
@@ -276,9 +214,9 @@ class TSEDataLoader(DataLoader):
 
 @dataclass
 class TSEDatasetBuilder(Dataset):
-    train_mix: TSEDataset
-    eval_mix: TSEDataset
-    test_mix: TSEDataset
+    train: TSEDataset
+    eval: TSEDataset
+    test: TSEDataset
 
     @staticmethod
     def __split(ls: List[T], proportions: List[float]) -> List[List[T]]:
@@ -320,8 +258,8 @@ class TSEDatasetBuilder(Dataset):
             y_lufs = random.randint(-33, -25)
             noise_lufs = random.randint(-33, -25)
             # apply loudness
-            y.wav = normalize_loudness_torch(y.wav, 44100, y_lufs)
-            noise.wav = normalize_loudness_torch(noise.wav, 44100, noise_lufs)
+            y.wav = normalize_loudness_torch(y.wav, 48000, y_lufs)
+            noise.wav = normalize_loudness_torch(noise.wav, 48000, noise_lufs)
             # get some random start point in the noise
             y_start = random.randint(-y.len, noise.len)
             noise_start = 0
@@ -353,8 +291,43 @@ class TSEDatasetBuilder(Dataset):
 
         return cls(TSEDataset(train_mix), TSEDataset(eval_mix), TSEDataset(test_mix))
 
+    def to_folder(self, p: Path) -> None:
+        if p.exists() and p.is_dir():
+            # train, eval, test
+            p_tr = p / "tr"
+            p_ev = p / "ev"
+            p_ts = p / "ts"
+            p_tr.mkdir(exist_ok=True)
+            p_ev.mkdir(exist_ok=True)
+            p_ts.mkdir(exist_ok=True)
+            self.train.to_folder(p_tr)
+            self.eval.to_folder(p_ev)
+            self.test.to_folder(p_ts)
+        else:
+            raise ValueError("%s doesn't exist or is not a folder" % p)
+
+    @classmethod
+    def from_folder(cls, p: Path) -> "TSEDatasetBuilder":
+        if (
+            p.exists()
+            and p.is_dir()
+            and all(
+                (p / subset).exists() and (p / subset).is_dir()
+                for subset in ("tr", "ev", "ts")
+            )
+        ):
+            train = TSEDataset.from_folder(p / "tr")
+            eval = TSEDataset.from_folder(p / "ev")
+            test = TSEDataset.from_folder(p / "ts")
+            return cls(train, eval, test)
+        else:
+            raise ValueError(
+                "%s doesn't exist, or is not a folder, or %s/tr %s/ev %s/ts doesn't all exist"
+                % (p, p, p, p)
+            )
+
     def __iter__(self) -> Iterator[TSEDataset]:
-        return iter((self.train_mix, self.eval_mix, self.test_mix))
+        return iter((self.train, self.eval, self.test))
 
 
 @dataclass
