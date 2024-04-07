@@ -43,17 +43,19 @@ class TSEArgs(SerdeJson):
         )
 
 
+class AdaptedWavLM:
+    raise NotImplementedError
+
+
 class TSEModule(ln.LightningModule):
     def __init__(self, args: TSEArgs) -> None:
         super().__init__()
         self.args = args
         wavlm_config = WavLMConfig()
         self.wavlm = WavLMModel(wavlm_config)
-        self.generator = Generator(GeneratorArgs.default())  # we use pretrained model
         self.conformers = ConformerEncoder(wavlm_config.hidden_size)
 
         self.wavlm.requires_grad_(False)
-        self.generator.requires_grad_(False)
 
     def training_step(self, in_: MelDatasetOutput) -> None:
         wavlm_features = self.wavlm(in_.wav)

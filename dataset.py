@@ -3,28 +3,24 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Optional,
     Tuple,
     TypeVar,
     Iterator,
     Generic,
     Sequence,
+    Any,
 )
 import torch
 from torch.utils.data.dataloader import Dataset, DataLoader
-import torchaudio
 from glob import glob
-import pandas as pd
 import os
-import io
-from tqdm import tqdm
 import random
 import torch.utils.data
 from dataclasses import dataclass
-from traits import SerdeJson, Json
-from audio_commons import read_wav_at_fs, mel_spectrogram, normalize_loudness_torch
+from audio_commons import read_wav_at_fs, normalize_loudness_torch
 from pathlib import Path
 import pickle
+from copy import deepcopy
 
 
 T = TypeVar("T")
@@ -86,10 +82,6 @@ class SpeakerAudioProvider:
         """given a speaker id string, returns a list of raw wav array"""
         pass
 
-    # @abstractmethod
-    # def __ior__(self, __value: "SpeakerAudioProvider") -> None:
-    #     pass
-
 
 class RandomDataset(SpeakerAudioProvider):
     def __init__(self, num_speaker: int, utt_range: Tuple[int, int]) -> None:
@@ -114,11 +106,16 @@ class TSEWavDataset(SpeakerAudioProvider):
     @classmethod
     def from_folder(cls, folder: str) -> "TSEWavDataset":
         data = {}
-        for spk in glob(folder):
+
+        for spk in os.listdir(folder):
             if os.path.isdir(os.path.join(folder, spk)):
                 data.setdefault(spk, []).extend(
-                    glob(os.path.join(folder, spk, "*.wav"))
+                    [
+                        LazyLoadAudio(path)
+                        for path in glob(os.path.join(folder, spk, "*.wav"))
+                    ]
                 )
+        data = {k: v for k, v in data.items() if len(v) > 0}
         return cls(data)
 
     def __init__(self, data: Dict[str, Sequence[LazyLoadable[Audio]]]) -> None:
@@ -148,7 +145,7 @@ def pad_seq_n_stack(wavs: Iterable[torch.Tensor], target_len: int) -> torch.Tens
 
 @dataclass
 class TSEDatasetArgs:
-    train_val_test_ratio = [0.8, 0.1, 0.1]
+    train_val_test_ratio: Tuple[float, float, float] = (0.8, 0.1, 0.1)
 
 
 @dataclass
@@ -184,7 +181,7 @@ class LazyLoadTSEItem(LazyLoadable[TSEItem]):
     path: str
 
     def load(self) -> TSEItem:
-        return super().load()
+        return TSEItem.from_file(Path(self.path))
 
 
 class TSEDataset(Dataset):
@@ -218,9 +215,7 @@ class TSEDataset(Dataset):
             )
 
 
-def tse_item_collate_fn(
-    batch: List[TSEItem]
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def tse_item_collate_fn(batch: List[TSEItem]) -> TSEItem:
     pad_length = max(mixed.shape[-1] for mixed, _, __ in batch)
 
     mixed_wavs, ref_wavs, clean_wavs = zip(*batch)
@@ -230,12 +225,23 @@ def tse_item_collate_fn(
     ref_pad_length = max(ref.shape[-1] for _, ref, __ in batch)
     batch_padded_ref_wav = pad_seq_n_stack(list(ref_wavs), ref_pad_length)
 
-    return (batch_padded_mixed_wav, batch_padded_ref_wav, batch_padded_clean_wav)
+    return TSEItem(
+        mix=batch_padded_mixed_wav, ref=batch_padded_ref_wav, y=batch_padded_clean_wav
+    )
 
 
 class TSEDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, collate_fn=tse_item_collate_fn)
+
+
+def sum_ge(len_seq: Iterable[int], target: int) -> bool:
+    s = 0
+    for i in len_seq:
+        s += i
+        if s >= target:
+            return True
+    return False
 
 
 @dataclass
@@ -262,26 +268,33 @@ class TSEDatasetBuilder(Dataset):
     def __gen_mix(
         spks: List[str], provider: SpeakerAudioProvider
     ) -> List[LoadedTSEItem]:
+        spks = deepcopy(spks)
         spk_utts = {spk: list(provider.get_speaker_files(spk)) for spk in spks}
-        c = 0
         res = []
-        while c < 200:
+        while len(spk_utts) >= 2 and (
+            any(len(v) >= 2 for v in spk_utts.values())
+            and sum_ge(map(len, spk_utts.values()), 3)
+        ):
             y_spk = random.choice(spks)
             if len(spk_utts[y_spk]) < 2:
-                c += 1
                 continue
             candidate_spk = [spk for spk in spks if spk != y_spk and spk_utts[spk]]
             if not candidate_spk:
-                c += 1
                 continue
             d_spk = random.choice(candidate_spk)
             # pick y, ref
             random.shuffle(spk_utts[y_spk])
             y = spk_utts[y_spk].pop().load()
             ref = spk_utts[y_spk].pop().load()
+            if len(spk_utts[y_spk]) == 0:
+                del spk_utts[y_spk]
+                spks.remove(y_spk)
             # pick noise
             random.shuffle(spk_utts[d_spk])
             noise = spk_utts[d_spk].pop().load()
+            if len(spk_utts[d_spk]) == 0:
+                del spk_utts[d_spk]
+                spks.remove(d_spk)
             # determine loudness of y and noise
             y_lufs = random.randint(-33, -25)
             noise_lufs = random.randint(-33, -25)
@@ -312,7 +325,9 @@ class TSEDatasetBuilder(Dataset):
         # - each utterance is only used once
         # - train, eval, test speakers don't intersect
         speakers = list(provider.get_speaker_list())
-        train_spk, eval_spk, test_spk = cls.__split(speakers, args.train_val_test_ratio)
+        train_spk, eval_spk, test_spk = cls.__split(
+            speakers, list(args.train_val_test_ratio)
+        )
         train_mix = cls.__gen_mix(train_spk, provider)
         eval_mix = cls.__gen_mix(eval_spk, provider)
         test_mix = cls.__gen_mix(test_spk, provider)
@@ -320,6 +335,8 @@ class TSEDatasetBuilder(Dataset):
         return cls(TSEDataset(train_mix), TSEDataset(eval_mix), TSEDataset(test_mix))
 
     def to_folder(self, p: Path) -> None:
+        if not p.exists():
+            p.mkdir(parents=True, exist_ok=True)
         if p.exists() and p.is_dir():
             # train, eval, test
             p_tr = p / "tr"
@@ -332,7 +349,9 @@ class TSEDatasetBuilder(Dataset):
             self.eval.to_folder(p_ev)
             self.test.to_folder(p_ts)
         else:
-            raise ValueError("%s doesn't exist or is not a folder" % p)
+            raise ValueError(
+                "%s doesn't exist, can't make directory, or is not a folder" % p
+            )
 
     @classmethod
     def from_folder(cls, p: Path) -> "TSEDatasetBuilder":
@@ -376,14 +395,12 @@ if __name__ == "__main__":
         )
         ax.set(title=title)
 
-    dataset = GenshinDataset.from_parquets(sys.argv[1])
-    tse_train, tse_eval, tse_test = TSEDatasetBuilder.from_provider(
-        dataset, TSEDatasetArgs()
-    )
+    # dataset = TSEWavDataset.from_folder(sys.argv[1])
+    # tse_train, tse_eval, tse_test = TSEDatasetBuilder.from_provider(
+    #     dataset, TSEDatasetArgs()
+    # )
+    tse_train, tse_eval, tse_test = TSEDatasetBuilder.from_folder(Path(sys.argv[1]))
     loader = TSEDataLoader(tse_train, batch_size=8, shuffle=True)
-    for batch in loader:
-        print(batch)
-        break
     for padded_x_hat, padded_ref, padded_y_hat in loader:
         fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(20, 8))
 
