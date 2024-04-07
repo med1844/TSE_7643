@@ -1,5 +1,15 @@
 from abc import abstractmethod
-from typing import Dict, Iterable, List, Optional, Tuple, TypeVar, Iterator, Generic
+from typing import (
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Iterator,
+    Generic,
+    Sequence,
+)
 import torch
 from torch.utils.data.dataloader import Dataset, DataLoader
 import torchaudio
@@ -111,7 +121,7 @@ class TSEWavDataset(SpeakerAudioProvider):
                 )
         return cls(data)
 
-    def __init__(self, data: Dict[str, List[LazyLoadable[Audio]]]) -> None:
+    def __init__(self, data: Dict[str, Sequence[LazyLoadable[Audio]]]) -> None:
         self.data = data
 
     def get_speaker_list(self) -> Iterable[str]:
@@ -162,7 +172,7 @@ class TSEItem:
 
 
 @dataclass
-class LoadedTSEItem(LazyLoadable):
+class LoadedTSEItem(LazyLoadable[TSEItem]):
     item: TSEItem
 
     def load(self) -> TSEItem:
@@ -170,7 +180,7 @@ class LoadedTSEItem(LazyLoadable):
 
 
 @dataclass
-class LazyLoadTSEItem(LazyLoadable):
+class LazyLoadTSEItem(LazyLoadable[TSEItem]):
     path: str
 
     def load(self) -> TSEItem:
@@ -178,7 +188,7 @@ class LazyLoadTSEItem(LazyLoadable):
 
 
 class TSEDataset(Dataset):
-    def __init__(self, items: List[LazyLoadable[TSEItem]]) -> None:
+    def __init__(self, items: Sequence[LazyLoadable[TSEItem]]) -> None:
         super().__init__()
         self.items = items
 
@@ -190,26 +200,21 @@ class TSEDataset(Dataset):
 
     def to_folder(self, p: Path):
         if p.exists() and p.is_dir():
-            for i, (mix, ref, y) in enumerate(self.items):
-                for k, v in zip((mix, ref, y), ("mix", "ref", "y")):
-                    torch.save(k, p / v / ("%d.pt" % i))
+            for i, item in enumerate(self.items):
+                item.load().to_file(p / f"{i}.pkl")
         else:
             raise ValueError("%s doesn't exist or is not a folder" % p)
 
     @classmethod
     def from_folder(cls, p: Path) -> "TSEDataset":
         if p.exists() and p.is_dir():
-            items = []
-            for mix_file, ref_file, y_file in zip(
-                *(glob(str(p / v / "*.pt")) for v in ("mix", "ref", "y"))
-            ):
-                mix, ref, y = map(torch.load, (mix_file, ref_file, y_file))
-                items.append(TSEItem(mix, ref, y))
+            items = [LazyLoadTSEItem(file) for file in glob(str(p / "*.pkl"))]
             return cls(items)
         else:
             raise ValueError(
                 "%s doesn't exist, or is not a folder, or %s/mix %s/ref %s/y doesn't all exist"
-                % (p, p, p, p)
+                % (p,)
+                * 4
             )
 
 
@@ -254,10 +259,12 @@ class TSEDatasetBuilder(Dataset):
         return res
 
     @staticmethod
-    def __gen_mix(spks: List[str], provider: SpeakerAudioProvider) -> List[TSEItem]:
+    def __gen_mix(
+        spks: List[str], provider: SpeakerAudioProvider
+    ) -> List[LoadedTSEItem]:
         spk_utts = {spk: list(provider.get_speaker_files(spk)) for spk in spks}
         c = 0
-        res: List[TSEItem] = []
+        res = []
         while c < 200:
             y_spk = random.choice(spks)
             if len(spk_utts[y_spk]) < 2:
@@ -295,7 +302,7 @@ class TSEDatasetBuilder(Dataset):
             mixed[..., y_start : y_start + y.len] += y.wav
             mixed[..., noise_start : noise_start + noise.len] += noise.wav
             # TODO add more distortions and background noises
-            res.append(TSEItem(mix=mixed, ref=ref.wav, y=y_pad))
+            res.append(LoadedTSEItem(TSEItem(mix=mixed, ref=ref.wav, y=y_pad)))
         return res
 
     @classmethod
@@ -351,103 +358,13 @@ class TSEDatasetBuilder(Dataset):
         return iter((self.train, self.eval, self.test))
 
 
-@dataclass
-class MelArgs(SerdeJson):
-    segment_size: int
-    n_fft: int
-    num_mels: int
-    hop_size: int
-    win_size: int
-    sampling_rate: int
-    fmin: int
-    fmax: Optional[int] = None
-
-    def to_json(self) -> Json:
-        return {
-            "segment_size": self.segment_size,
-            "n_fft": self.n_fft,
-            "num_mels": self.num_mels,
-            "hop_size": self.hop_size,
-            "win_size": self.win_size,
-            "sampling_rate": self.sampling_rate,
-            "fmin": self.fmin,
-            "fmax": self.fmax,
-        }
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "MelArgs":
-        return cls(
-            segment_size=obj["segment_size"],
-            n_fft=obj["n_fft"],
-            num_mels=obj["num_mels"],
-            hop_size=obj["hop_size"],
-            win_size=obj["win_size"],
-            sampling_rate=obj["sampling_rate"],
-            fmin=obj["fmin"],
-            fmax=obj["fmax"],
-        )
-
-
-@dataclass
-class MelDatasetOutput:
-    mel: torch.Tensor
-    wav: torch.Tensor
-
-
-class MelDataset(Dataset):
-    def __init__(self, audios: List[LazyLoadable[Audio]], args: MelArgs):
-        self.audios = [a for a in audios if 3 <= a.load().len_in_s]
-        self.segment_size = args.segment_size
-        self.sampling_rate = args.sampling_rate
-        self.n_fft = args.n_fft
-        self.num_mels = args.num_mels
-        self.hop_size = args.hop_size
-        self.win_size = args.win_size
-        self.fmin = args.fmin
-        self.fmax = args.fmax
-
-    def __getitem__(self, index: int) -> MelDatasetOutput:
-        audio = self.audios[index]
-        audio = torch.FloatTensor(audio)
-
-        if audio.size(-1) >= self.segment_size:
-            max_audio_start = audio.size(-1) - self.segment_size
-            audio_start = random.randint(0, max_audio_start)
-            audio = audio[..., audio_start : audio_start + self.segment_size]
-        else:
-            audio = torch.nn.functional.pad(
-                audio, (0, self.segment_size - audio.size(1)), "constant"
-            )
-
-        mel = mel_spectrogram(
-            audio,
-            self.n_fft,
-            self.num_mels,
-            self.sampling_rate,
-            self.hop_size,
-            self.win_size,
-            self.fmin,
-            self.fmax,
-            center=False,
-        )
-
-        return MelDatasetOutput(mel=mel.squeeze(), wav=audio.squeeze(0))
-
-    def __len__(self):
-        return len(self.audios)
-
-    @classmethod
-    def from_speech_dataset(cls, dataset: SpeechDataset, args: MelArgs) -> "MelDataset":
-        return cls(dataset.audios, args)
-
-
 if __name__ == "__main__":
     import librosa
     import librosa.display
     from matplotlib import pyplot as plt
     import sys
 
-    def plot_melspectrogram(wav, ax, fs=44100, title="Melspectrogram"):
+    def plot_melspectrogram(wav, ax, fs=48000, title="Melspectrogram"):
         s = librosa.feature.melspectrogram(y=wav, sr=fs)
         librosa.display.specshow(
             librosa.power_to_db(s),
