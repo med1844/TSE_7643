@@ -5,8 +5,6 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 import numpy
-from dataclasses import dataclass
-from traits import SerdeJson, Json
 
 
 class RelativePositionalEncoding(nn.Module):

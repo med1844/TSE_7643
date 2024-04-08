@@ -41,6 +41,7 @@ def main(src: Iterable[str], dst: str):
     tse_dataset_set = TSEDatasetBuilder.from_provider(
         merged_tse_wav_dataset, TSEDatasetArgs()
     )
+
     tse_dataset_set.to_folder(Path(dst))
 
 

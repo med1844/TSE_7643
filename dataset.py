@@ -21,14 +21,12 @@ from audio_commons import read_wav_at_fs, normalize_loudness_torch
 from pathlib import Path
 import pickle
 from copy import deepcopy
+from pydantic import BaseModel
 
 
 T = TypeVar("T")
 
 
-# trait LazyLoad<T> {
-#   fn load(&self) -> T;
-# }
 class LazyLoadable(Generic[T]):
     @abstractmethod
     def load(self) -> T:
@@ -143,8 +141,7 @@ def pad_seq_n_stack(wavs: Iterable[torch.Tensor], target_len: int) -> torch.Tens
     return torch.stack(padded_wavs)
 
 
-@dataclass
-class TSEDatasetArgs:
+class TSEDatasetArgs(BaseModel):
     train_val_test_ratio: Tuple[float, float, float] = (0.8, 0.1, 0.1)
 
 
@@ -395,10 +392,6 @@ if __name__ == "__main__":
         )
         ax.set(title=title)
 
-    # dataset = TSEWavDataset.from_folder(sys.argv[1])
-    # tse_train, tse_eval, tse_test = TSEDatasetBuilder.from_provider(
-    #     dataset, TSEDatasetArgs()
-    # )
     tse_train, tse_eval, tse_test = TSEDatasetBuilder.from_folder(Path(sys.argv[1]))
     loader = TSEDataLoader(tse_train, batch_size=8, shuffle=True)
     for padded_x_hat, padded_ref, padded_y_hat in loader:

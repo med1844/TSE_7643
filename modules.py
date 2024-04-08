@@ -1,64 +1,77 @@
-from typing import List, Tuple
-from audio_commons import plot_spectrogram
-import lightning as ln
-from models.generator import Generator, GeneratorArgs
-from transformers import WavLMConfig, WavLMModel
-from transformers.modeling_outputs import Wav2Vec2BaseModelOutput
+from typing import Tuple
 import torch
 import torch.nn as nn
-import itertools
-from dataclasses import dataclass
-from losses import feature_loss, discriminator_loss, generator_loss
-from dataset import MelDatasetOutput, mel_spectrogram, MelArgs
+import lightning as ln
+from transformers import WavLMConfig
+from models.adapted_wavlm import AdaptedWavLM, AdaptedWavLMArgs
+from models.mask_predictor import MaskPredictor, MaskPredictorArgs
+from dataset import TSEItem
+from speechbrain.pretrained import EncoderClassifier
 import torchaudio
-from traits import SerdeJson, Json
-from models.conformer import ConformerBlock, ConformerEncoder
+from pydantic import BaseModel
 
 
-@dataclass
-class TSEArgs(SerdeJson):
-    learning_rate: float
-    mel_args: MelArgs
-    num_conformer_blocks: int
+class STFTArgs(BaseModel):
+    hop_size: int = 240
+    win_size: int = 1200
+
+    @property
+    def window(self) -> torch.Tensor:
+        return torch.hann_window(self.win_size)
+
+
+class TSEArgs(BaseModel):
+    adapted_wavlm_config: AdaptedWavLMArgs
+    stft_args: STFTArgs = STFTArgs()
     adam_beta: Tuple[float, float] = (0.9, 0.99)
     lr_decay: float = 0.999
-
-    def to_json(self) -> Json:
-        return {
-            "learning_rate": self.learning_rate,
-            "mel_args": self.mel_args.to_json(),
-            "num_conformer_blocks": self.num_conformer_blocks,
-            "adam_beta": list(self.adam_beta),
-            "lr_decay": self.lr_decay,
-        }
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "TSEArgs":
-        return cls(
-            learning_rate=obj["learning_rate"],
-            mel_args=MelArgs.from_json(obj["mel_args"]),
-            num_conformer_blocks=obj["num_conformer_blocks"],
-            adam_beta=tuple(obj["adam_beta"]),
-            lr_decay=obj["lr_decay"],
-        )
-
-
-class AdaptedWavLM:
-    raise NotImplementedError
 
 
 class TSEModule(ln.LightningModule):
     def __init__(self, args: TSEArgs) -> None:
         super().__init__()
         self.args = args
-        wavlm_config = WavLMConfig()
-        self.wavlm = WavLMModel(wavlm_config)
-        self.conformers = ConformerEncoder(wavlm_config.hidden_size)
+        self.adapted_wavlm = AdaptedWavLM(args.adapted_wavlm_config)
+        self.x_vector = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-xvect-voxceleb",
+            savedir="pretrained_models/spkrec-xvect-voxceleb",
+        )
+        self.mask_predictor = MaskPredictor(
+            MaskPredictorArgs(
+                wavlm_dim=WavLMConfig().hidden_size, fft_dim=args.stft_args.win_size
+            )
+        )
 
-        self.wavlm.requires_grad_(False)
-
-    def training_step(self, in_: MelDatasetOutput) -> None:
-        wavlm_features = self.wavlm(in_.wav)
-
-    def validation_step(self, in_: MelDatasetOutput) -> torch.Tensor:
-        pass
+    def training_step(self, in_: TSEItem) -> torch.Tensor:
+        mix, ref, y = in_
+        # mix: B x T, ref: B x T', y: B x T
+        spk_emb = self.x_vector.encode_batch(ref)
+        wavlm_features = self.adapted_wavlm(
+            torchaudio.functional.resample(mix, 48000, 16000), spk_emb
+        )
+        stft_args = self.args.stft_args
+        mix_stft = torch.stft(
+            mix,
+            n_fft=stft_args.win_size,
+            hop_length=stft_args.hop_size,
+            win_length=stft_args.win_size,
+            window=stft_args.window,
+            return_complex=True,
+        )
+        mix_mag = mix_stft.abs()
+        mix_phase = mix_stft.angle()
+        dup_wavlm_features = wavlm_features.repeat_interleave(
+            mix_mag.shape[1] // wavlm_features.shape[1], dim=1
+        )
+        mask = self.mask_predictor(dup_wavlm_features, mix_mag)
+        est_y_mag = mix_mag * mask
+        est_y_stft = torch.polar(est_y_mag, mix_phase)
+        est_y = torch.istft(
+            est_y_stft,
+            n_fft=stft_args.win_size,
+            hop_length=stft_args.hop_size,
+            win_length=stft_args.win_size,
+            window=stft_args.window,
+        )
+        loss = nn.functional.mse_loss(est_y, y)
+        return loss
