@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from conformer import ConformerBlock, ConformerEncoder
+from models.conformer import ConformerBlock, ConformerEncoder
 from pydantic import BaseModel
 
 
@@ -32,4 +32,4 @@ class MaskPredictor(nn.Module):
         - https://arxiv.org/abs/2211.00482 for conditioning
         """
         # TODO: implement mask predictor, use adapted_wavlm_feature to condition the model
-        return torch.ones_like(mix_mag)
+        return torch.ones_like(mix_mag, requires_grad=True)

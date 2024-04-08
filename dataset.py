@@ -22,6 +22,7 @@ from pathlib import Path
 import pickle
 from copy import deepcopy
 from pydantic import BaseModel
+from functools import partial
 
 
 T = TypeVar("T")
@@ -212,8 +213,9 @@ class TSEDataset(Dataset):
             )
 
 
-def tse_item_collate_fn(batch: List[TSEItem]) -> TSEItem:
+def tse_item_collate_fn(alignment: int, batch: List[TSEItem]) -> TSEItem:
     pad_length = max(mixed.shape[-1] for mixed, _, __ in batch)
+    pad_length += (alignment - pad_length % alignment) % alignment
 
     mixed_wavs, ref_wavs, clean_wavs = zip(*batch)
     batch_padded_mixed_wav = pad_seq_n_stack(list(mixed_wavs), pad_length)
@@ -228,8 +230,10 @@ def tse_item_collate_fn(batch: List[TSEItem]) -> TSEItem:
 
 
 class TSEDataLoader(DataLoader):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, collate_fn=tse_item_collate_fn)
+    def __init__(self, stft_hop_size: int, *args, **kwargs):
+        super().__init__(
+            *args, **kwargs, collate_fn=partial(tse_item_collate_fn, stft_hop_size)
+        )
 
 
 def sum_ge(len_seq: Iterable[int], target: int) -> bool:

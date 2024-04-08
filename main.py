@@ -14,7 +14,7 @@ class TrainArgs(BaseModel):
     exp_name: str
     epochs: int
     batch_size: int
-    sr_args: TSEArgs
+    tse_args: TSEArgs
 
     @classmethod
     def default(cls) -> "TrainArgs":
@@ -22,7 +22,8 @@ class TrainArgs(BaseModel):
             exp_name="speech_reconstruction",
             epochs=10,
             batch_size=16,
-            sr_args=TSEArgs(
+            tse_args=TSEArgs(
+                lr=2e-4,
                 adapted_wavlm_config=AdaptedWavLMArgs(),
             ),
         )
@@ -30,9 +31,10 @@ class TrainArgs(BaseModel):
 
 def train(args: TrainArgs, dataset_path: str):
     train, eval, test = TSEDatasetBuilder.from_folder(Path(dataset_path))
-    train_loader = TSEDataLoader(train)
-    eval_loader = TSEDataLoader(eval)
-    sr_module = TSEModule(args.sr_args)
+    hop_size = args.tse_args.stft_args.hop_size
+    train_loader = TSEDataLoader(hop_size, train, batch_size=args.batch_size)
+    eval_loader = TSEDataLoader(hop_size, eval, batch_size=args.batch_size)
+    tse_module = TSEModule(args.tse_args)
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         dirpath="exp/%s/checkpoints/" % args.exp_name,
@@ -41,12 +43,12 @@ def train(args: TrainArgs, dataset_path: str):
         mode="min",
     )
     trainer = Trainer(
-        logger=WandbLogger(project=args.exp_name),
+        # logger=WandbLogger(project=args.exp_name),
         # logger=TensorBoardLogger("tb_logs", name=args.exp_name),
         callbacks=[checkpoint_callback],
         max_epochs=args.epochs,
     )
-    trainer.fit(sr_module, train_loader, eval_loader)
+    trainer.fit(tse_module, train_loader, eval_loader)
 
 
 @click.command()
@@ -62,7 +64,6 @@ def train(args: TrainArgs, dataset_path: str):
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
 )
 def main(config: Optional[str], dataset: str):
-    # TODO remove parquets folder from args
     if config is None:
         args = TrainArgs.default()
     else:

@@ -1,6 +1,7 @@
-from typing import Tuple
+from typing import Tuple, Dict, Union
 import torch
 import torch.nn as nn
+import torch.optim
 import lightning as ln
 from transformers import WavLMConfig
 from models.adapted_wavlm import AdaptedWavLM, AdaptedWavLMArgs
@@ -21,9 +22,10 @@ class STFTArgs(BaseModel):
 
 
 class TSEArgs(BaseModel):
+    lr: float
     adapted_wavlm_config: AdaptedWavLMArgs
     stft_args: STFTArgs = STFTArgs()
-    adam_beta: Tuple[float, float] = (0.9, 0.99)
+    adamw_betas: Tuple[float, float] = (0.9, 0.99)
     lr_decay: float = 0.999
 
 
@@ -36,6 +38,7 @@ class TSEModule(ln.LightningModule):
             source="speechbrain/spkrec-xvect-voxceleb",
             savedir="pretrained_models/spkrec-xvect-voxceleb",
         )
+        self.x_vector.requires_grad_(False)
         self.mask_predictor = MaskPredictor(
             MaskPredictorArgs(
                 wavlm_dim=WavLMConfig().hidden_size, fft_dim=args.stft_args.win_size
@@ -45,7 +48,8 @@ class TSEModule(ln.LightningModule):
     def training_step(self, in_: TSEItem) -> torch.Tensor:
         mix, ref, y = in_
         # mix: B x T, ref: B x T', y: B x T
-        spk_emb = self.x_vector.encode_batch(ref)
+        with torch.no_grad():
+            spk_emb = self.x_vector.encode_batch(ref)
         wavlm_features = self.adapted_wavlm(
             torchaudio.functional.resample(mix, 48000, 16000), spk_emb
         )
@@ -73,5 +77,17 @@ class TSEModule(ln.LightningModule):
             win_length=stft_args.win_size,
             window=stft_args.window,
         )
+        est_y = est_y[..., : y.shape[-1]]
         loss = nn.functional.mse_loss(est_y, y)
         return loss
+
+    def configure_optimizers(
+        self
+    ) -> Dict[str, Union[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]]:
+        optimizer = torch.optim.AdamW(
+            self.parameters(), lr=self.args.lr, betas=self.args.adamw_betas
+        )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=self.args.lr_decay
+        )
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}

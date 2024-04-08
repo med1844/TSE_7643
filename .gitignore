@@ -3,3 +3,6 @@ tb_logs
 wandb
 weights
 poetry.lock
+lightning_logs
+pretrained_models
+*.wav

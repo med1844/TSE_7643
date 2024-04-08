@@ -116,34 +116,6 @@ def mel_spectrogram(
     return spec
 
 
-def get_mel_torch(
-    y: torch.Tensor,
-    sr: int,
-    num_mel=128,
-    hop_size=512,
-    win_size=2048,
-    fft_size=2048,
-    fmin=40,
-    fmax=16000,
-):
-    with torch.no_grad():
-        mel_torch = (
-            mel_spectrogram(
-                y.unsqueeze(0),
-                fft_size,
-                num_mel,
-                sr,
-                hop_size,
-                win_size,
-                fmin,
-                fmax,
-            )
-            .squeeze(0)
-            .T
-        )
-        return mel_torch.cpu().numpy()
-
-
 def normalize_loudness(y: np.ndarray, fs: int, target_loudness=-30) -> np.ndarray:
     meter = pyloudnorm.Meter(fs)
     loudness = meter.integrated_loudness(y)

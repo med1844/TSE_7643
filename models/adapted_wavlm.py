@@ -11,6 +11,7 @@ class AdaptedWavLMArgs(BaseModel):
 
 class AdaptedWavLM(nn.Module):
     def __init__(self, args: AdaptedWavLMArgs) -> None:
+        super().__init__()
         self.wavlm = WavLMModel(WavLMConfig())
         self.wavlm.requires_grad_(False)
 
@@ -29,4 +30,4 @@ class AdaptedWavLM(nn.Module):
         - https://github.com/sinhat98/adapter-wavlm/blob/main/modeling.py
         """
         # TODO: add adaptation logic & spk_emb conditioning
-        return self.wavlm(mix)
+        return self.wavlm(mix).extract_features
