@@ -147,7 +147,16 @@ class TSEDatasetArgs(BaseModel):
 
 
 @dataclass
-class TSEItem:
+class TSEPredictItem:
+    mix: torch.Tensor
+    ref: torch.Tensor
+
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        return iter((self.mix, self.ref))
+
+
+@dataclass
+class TSETrainItem:
     mix: torch.Tensor
     ref: torch.Tensor
     y: torch.Tensor
@@ -167,30 +176,30 @@ class TSEItem:
 
 
 @dataclass
-class LoadedTSEItem(LazyLoadable[TSEItem]):
-    item: TSEItem
+class LoadedTSEItem(LazyLoadable[TSETrainItem]):
+    item: TSETrainItem
 
-    def load(self) -> TSEItem:
+    def load(self) -> TSETrainItem:
         return self.item
 
 
 @dataclass
-class LazyLoadTSEItem(LazyLoadable[TSEItem]):
+class LazyLoadTSEItem(LazyLoadable[TSETrainItem]):
     path: str
 
-    def load(self) -> TSEItem:
-        return TSEItem.from_file(Path(self.path))
+    def load(self) -> TSETrainItem:
+        return TSETrainItem.from_file(Path(self.path))
 
 
 class TSEDataset(Dataset):
-    def __init__(self, items: Sequence[LazyLoadable[TSEItem]]) -> None:
+    def __init__(self, items: Sequence[LazyLoadable[TSETrainItem]]) -> None:
         super().__init__()
         self.items = items
 
     def __len__(self) -> int:
         return len(self.items)
 
-    def __getitem__(self, index: int) -> TSEItem:
+    def __getitem__(self, index: int) -> TSETrainItem:
         return self.items[index].load()
 
     def to_folder(self, p: Path):
@@ -213,7 +222,7 @@ class TSEDataset(Dataset):
             )
 
 
-def tse_item_collate_fn(alignment: int, batch: List[TSEItem]) -> TSEItem:
+def tse_item_collate_fn(alignment: int, batch: List[TSETrainItem]) -> TSETrainItem:
     pad_length = max(mixed.shape[-1] for mixed, _, __ in batch)
     pad_length += (alignment - pad_length % alignment) % alignment
 
@@ -224,7 +233,7 @@ def tse_item_collate_fn(alignment: int, batch: List[TSEItem]) -> TSEItem:
     ref_pad_length = max(ref.shape[-1] for _, ref, __ in batch)
     batch_padded_ref_wav = pad_seq_n_stack(list(ref_wavs), ref_pad_length)
 
-    return TSEItem(
+    return TSETrainItem(
         mix=batch_padded_mixed_wav, ref=batch_padded_ref_wav, y=batch_padded_clean_wav
     )
 
@@ -316,7 +325,7 @@ class TSEDatasetBuilder(Dataset):
             mixed[..., y_start : y_start + y.len] += y.wav
             mixed[..., noise_start : noise_start + noise.len] += noise.wav
             # TODO add more distortions and background noises
-            res.append(LoadedTSEItem(TSEItem(mix=mixed, ref=ref.wav, y=y_pad)))
+            res.append(LoadedTSEItem(TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)))
         return res
 
     @classmethod

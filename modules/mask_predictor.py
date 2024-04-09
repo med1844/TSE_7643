@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from models.conformer import ConformerBlock, ConformerEncoder
+from modules.conformer import ConformerBlock, ConformerEncoder
 from pydantic import BaseModel
 
 
@@ -19,12 +19,16 @@ class MaskPredictorArgs(BaseModel):
 class MaskPredictor(nn.Module):
     def __init__(self, args: MaskPredictorArgs) -> None:
         super().__init__()
+        real_fft_dim = (
+            (args.fft_dim >> 1) + 1
+        )  # 1200 -> 601, 2048 -> 1025, see https://pytorch.org/docs/stable/generated/torch.stft.html
+        self.example_fcn = nn.Linear(args.wavlm_dim + real_fft_dim, real_fft_dim)
 
     def forward(self, adapted_wavlm_feature: torch.Tensor, mix_mag: torch.Tensor):
         """
         Args:
             adapted_wavlm_feature: B x T x D
-            mix_mag: B x T x F, mixed audio magnitude
+            mix_mag: B x T x F, mixed audio spectrogram magnitude; F = (args.fft_dim // 2) + 1
         Returns:
             predicted mask, B x T x F
         References:
@@ -32,4 +36,5 @@ class MaskPredictor(nn.Module):
         - https://arxiv.org/abs/2211.00482 for conditioning
         """
         # TODO: implement mask predictor, use adapted_wavlm_feature to condition the model
-        return torch.ones_like(mix_mag, requires_grad=True)
+        # feel free to delete the example fcn, it's just to ensure the dimensions are correct
+        return self.example_fcn(torch.concat((mix_mag, adapted_wavlm_feature), dim=-1))

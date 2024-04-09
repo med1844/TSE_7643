@@ -1,7 +1,6 @@
-from transformers import WavLMConfig, WavLMModel
-from transformers.modeling_outputs import Wav2Vec2BaseModelOutput
 import torch
 import torch.nn as nn
+from modules.wavlm.WavLMBasePlus import WavLMBasePlus
 from pydantic import BaseModel
 
 
@@ -10,10 +9,9 @@ class AdaptedWavLMArgs(BaseModel):
 
 
 class AdaptedWavLM(nn.Module):
-    def __init__(self, args: AdaptedWavLMArgs) -> None:
+    def __init__(self, args: AdaptedWavLMArgs, device=None) -> None:
         super().__init__()
-        self.wavlm = WavLMModel(WavLMConfig())
-        self.wavlm.requires_grad_(False)
+        self.wavlm = WavLMBasePlus(device=device)
 
         # TODO: add adaptation layer initialization
         # TODO: add argument into `AdaptedWavLMConfig` if there's any
@@ -30,4 +28,4 @@ class AdaptedWavLM(nn.Module):
         - https://github.com/sinhat98/adapter-wavlm/blob/main/modeling.py
         """
         # TODO: add adaptation logic & spk_emb conditioning
-        return self.wavlm(mix).extract_features
+        return self.wavlm(mix)
