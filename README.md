@@ -24,22 +24,46 @@ poetry config cache-dir $HOME/scratch/.cache
 poetry config virtualenvs.in-project true
 ```
 
+## Prepare pretrained models
+
+At project root, run:
+
+```bash
+mkdir pretrained_models
+```
+
+Then, manually download `WavLM-Base+.pt` from [here](https://drive.google.com/file/d/1-zlAj2SyVJVsbhifwpTlAfrgc9qu-HDb/view?usp=share_link) and put it into `pretrained_models/`.
+
 ## Prepare dataset
 
-Ensure you are at the root directory of the repository. Then:
+### Remove files too long or too short
 
 ```bash
-mkdir datasets
-cd datasets
-git clone https://huggingface.co/datasets/hanamizuki-ai/genshin-voice-v3.5-mandarin
+python preprocess_wav_dataset.py datasets/cn datasets/en datasets/jp
 ```
 
-This would take a long time.
+### Build TSE dataset
 
-After this is finished, execute:
+Generate dataset during each run is time consuming, especially when the training dataset is large. Thus we generate the TSE dataset first before training.
+
+You need `build_tse_dataset.py` to build the dataset. It's ok to have multiple valid datasets, where each of them has structure "./{spk_id}/*.wav". Here's an example:
 
 ```bash
-cd ..
-poetry run python main.py -c configs/v0.json -p datasets/genshin-voice-v3.5-mandarin/data/
+python build_tse_dataset.py datasets/cn datasets/en datasets/jp datasets/output_tse
 ```
 
+In the example above, all three input has subdirectories and files that matches `datasets/cn/{spk_id}/*.wav`, `datasets/en/{spk_id}/*.wav`, `datasets/jp/{spk_id}/*.wav`. The result would be write into the output folder `datasets/output_tse`.
+
+## Training
+
+With default config, you can start training with this command:
+
+```bash
+python main.py --dataset datasets/output_tse
+```
+
+Or if you wish to use custom config, pass `--config` or `-c`:
+
+```bash
+python main.py -c configs/default.json -d datasets/output_tse
+```
