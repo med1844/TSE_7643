@@ -78,3 +78,11 @@ class TSEModel(nn.Module):
             window=window,
         )
         return est_y
+
+    def to(self, device: torch.device):
+        self.adapted_wavlm = self.adapted_wavlm.to(device)
+        self.adapted_wavlm.device = device
+        self.x_vector = self.x_vector.to(device)
+        self.x_vector.device = device
+        self.mask_predictor = self.mask_predictor.to(device)
+        self.mask_predictor.device = device

@@ -75,6 +75,10 @@ class TSEModule(LightningModule):
         )
         return [optimizer], [scheduler]
 
+    def to(self, device):
+        self.model.to(device)
+        self.eval_loss_mean = self.eval_loss_mean.to(device)
+
 
 def train(args: TrainArgs, dataset_path: str):
     hop_size = args.tse_args.stft_args.hop_size
@@ -84,7 +88,8 @@ def train(args: TrainArgs, dataset_path: str):
     )
     val_loader = TSEDataLoader(hop_size, val_ds, batch_size=args.batch_size)
 
-    model = TSEModule(args)
+    module = TSEModule(args)
+    module.to(torch.cuda.current_device())
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss", mode="min", save_top_k=3, dirpath="checkpoints/"
     )
@@ -95,7 +100,7 @@ def train(args: TrainArgs, dataset_path: str):
         callbacks=[checkpoint_callback],
         logger=logger,
     )
-    trainer.fit(model, train_loader, val_loader)
+    trainer.fit(module, train_loader, val_loader)
 
 
 @click.command()

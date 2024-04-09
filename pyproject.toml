@@ -22,9 +22,10 @@ wandb = "^0.16.3"
 pillow = "^10.2.0"
 torchvision = "^0.17.1"
 matplotlib = "^3.8.3"
-speechbrain = "^1.0.0"
+speechbrain = "0.5.16"
 pydantic = "^2.6.4"
 lightning = "^2.2.1"
+pyloudnorm = "^0.1.1"
 
 [build-system]
 requires = ["poetry-core"]
