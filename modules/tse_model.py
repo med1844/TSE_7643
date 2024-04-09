@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.optim
 from transformers import WavLMConfig
+from modules.adapted_x_vec import AdaptedXVector, AdaptedXVectorArgs
 from modules.adapted_wavlm import AdaptedWavLM, AdaptedWavLMArgs
 from modules.mask_predictor import MaskPredictor, MaskPredictorArgs
 from dataset import TSEPredictItem
-from speechbrain.pretrained import EncoderClassifier
 import torchaudio
 from pydantic import BaseModel
 
@@ -21,7 +21,8 @@ class STFTArgs(BaseModel):
 
 
 class TSEModelArgs(BaseModel):
-    adapted_wavlm_arg: AdaptedWavLMArgs
+    adapted_wavlm_args: AdaptedWavLMArgs
+    adapted_x_vec_args: AdaptedXVectorArgs
     stft_args: STFTArgs = STFTArgs()
 
 
@@ -29,12 +30,8 @@ class TSEModel(nn.Module):
     def __init__(self, args: TSEModelArgs) -> None:
         super().__init__()
         self.args = args
-        self.adapted_wavlm = AdaptedWavLM(args.adapted_wavlm_arg)
-        self.x_vector = EncoderClassifier.from_hparams(
-            source="speechbrain/spkrec-xvect-voxceleb",
-            savedir="pretrained_models/spkrec-xvect-voxceleb",
-        )
-        self.x_vector.eval()
+        self.adapted_wavlm = AdaptedWavLM(args.adapted_wavlm_args)
+        self.adapted_x_vec = AdaptedXVector(args.adapted_x_vec_args)
         self.mask_predictor = MaskPredictor(
             MaskPredictorArgs(
                 wavlm_dim=WavLMConfig().hidden_size, fft_dim=args.stft_args.win_size
@@ -44,8 +41,7 @@ class TSEModel(nn.Module):
     def forward(self, batch: TSEPredictItem) -> torch.Tensor:
         mix, ref = batch
         # mix: B x T, ref: B x T', y: B x T
-        with torch.no_grad():
-            spk_emb = self.x_vector.encode_batch(ref)
+        spk_emb = self.adapted_x_vec(ref)
         wavlm_features = self.adapted_wavlm(
             torchaudio.functional.resample(mix, 48000, 16000), spk_emb
         )
@@ -78,11 +74,3 @@ class TSEModel(nn.Module):
             window=window,
         )
         return est_y
-
-    def to(self, device: torch.device):
-        self.adapted_wavlm = self.adapted_wavlm.to(device)
-        self.adapted_wavlm.device = device
-        self.x_vector = self.x_vector.to(device)
-        self.x_vector.device = device
-        self.mask_predictor = self.mask_predictor.to(device)
-        self.mask_predictor.device = device

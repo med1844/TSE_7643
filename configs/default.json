@@ -3,7 +3,11 @@
     "epochs": 10,
     "batch_size": 16,
     "tse_args": {
-        "adapted_wavlm_arg": {},
+        "adapted_wavlm_args": {},
+        "adapted_x_vec_args": {
+            "hidden_size": 512,
+            "out_size": 512
+        },
         "stft_args": {
             "n_fft": 2048,
             "hop_size": 240,
@@ -11,7 +15,6 @@
         }
     },
     "learning_rate": 0.0002,
-    "device": "cuda",
     "adamw_betas": [
         0.9,
         0.99

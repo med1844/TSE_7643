@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Tuple
+from typing import Optional, Tuple
 from pathlib import Path
 import torch
 import torch.nn as nn
@@ -11,6 +11,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel
 import click
 from modules.adapted_wavlm import AdaptedWavLMArgs
+from modules.adapted_x_vec import AdaptedXVectorArgs
 from modules.tse_model import TSEModelArgs, TSEModel
 from dataset import TSEDatasetBuilder, TSEDataLoader, TSEPredictItem, TSETrainItem
 
@@ -31,7 +32,8 @@ class TrainArgs(BaseModel):
             epochs=10,
             batch_size=16,
             tse_args=TSEModelArgs(
-                adapted_wavlm_arg=AdaptedWavLMArgs(),
+                adapted_wavlm_args=AdaptedWavLMArgs(),
+                adapted_x_vec_args=AdaptedXVectorArgs(),
             ),
             learning_rate=2e-4,
         )
@@ -75,10 +77,6 @@ class TSEModule(LightningModule):
         )
         return [optimizer], [scheduler]
 
-    def to(self, device):
-        self.model.to(device)
-        self.eval_loss_mean = self.eval_loss_mean.to(device)
-
 
 def train(args: TrainArgs, dataset_path: str):
     hop_size = args.tse_args.stft_args.hop_size
@@ -89,7 +87,6 @@ def train(args: TrainArgs, dataset_path: str):
     val_loader = TSEDataLoader(hop_size, val_ds, batch_size=args.batch_size)
 
     module = TSEModule(args)
-    module.to(torch.cuda.current_device())
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss", mode="min", save_top_k=3, dirpath="checkpoints/"
     )

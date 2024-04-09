@@ -36,5 +36,6 @@ class AdaptedWavLM(nn.Module):
         #   DON'T modify any file in modules.wavlm
         # 1. spk_emb conditioning. try to implement CLN in 2211.00482, steps:
         # - you will need a transformer block, so build a new class that wraps TransformerSentenceEncoderLayer
+        #   or maybe just vanilla transformer block
         # - copy & modify the forward function to add support of conditioning using spk_emb
         return self.example_fcn(spk_emb) + self.wavlm(mix)

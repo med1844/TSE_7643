@@ -1,6 +1,5 @@
 from typing import BinaryIO, Tuple, Union, Optional, List
 import torch
-import torch.nn as nn
 import torchaudio
 from PIL import Image
 import matplotlib.pyplot as plt

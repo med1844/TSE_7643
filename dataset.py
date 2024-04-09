@@ -8,7 +8,6 @@ from typing import (
     Iterator,
     Generic,
     Sequence,
-    Any,
 )
 import torch
 from torch.utils.data.dataloader import Dataset, DataLoader
@@ -217,8 +216,7 @@ class TSEDataset(Dataset):
         else:
             raise ValueError(
                 "%s doesn't exist, or is not a folder, or %s/mix %s/ref %s/y doesn't all exist"
-                % (p,)
-                * 4
+                % (p, p, p, p)
             )
 
 
