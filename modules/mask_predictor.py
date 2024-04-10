@@ -22,7 +22,11 @@ class MaskPredictor(nn.Module):
         real_fft_dim = (
             (args.fft_dim >> 1) + 1
         )  # 1200 -> 601, 2048 -> 1025, see https://pytorch.org/docs/stable/generated/torch.stft.html
-        self.example_fcn = nn.Linear(args.wavlm_dim + real_fft_dim, real_fft_dim)
+        self.example_layer = nn.Sequential(
+            nn.Linear(args.wavlm_dim + real_fft_dim, real_fft_dim),
+            nn.LayerNorm(real_fft_dim),
+            nn.ReLU(),
+        )
 
     def forward(self, adapted_wavlm_feature: torch.Tensor, mix_mag: torch.Tensor):
         """
@@ -37,4 +41,6 @@ class MaskPredictor(nn.Module):
         """
         # TODO: implement mask predictor, use adapted_wavlm_feature to condition the model
         # feel free to delete the example fcn, it's just to ensure the dimensions are correct
-        return self.example_fcn(torch.concat((mix_mag, adapted_wavlm_feature), dim=-1))
+        return self.example_layer(
+            torch.concat((mix_mag, adapted_wavlm_feature), dim=-1)
+        )

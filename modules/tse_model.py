@@ -73,4 +73,5 @@ class TSEModel(nn.Module):
             win_length=stft_args.win_size,
             window=window,
         )
+        est_y = est_y.clamp(-1, 1)
         return est_y

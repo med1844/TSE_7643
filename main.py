@@ -13,7 +13,12 @@ import click
 from modules.adapted_wavlm import AdaptedWavLMArgs
 from modules.adapted_x_vec import AdaptedXVectorArgs
 from modules.tse_model import TSEModelArgs, TSEModel
-from dataset import TSEDatasetBuilder, TSEDataLoader, TSEPredictItem, TSETrainItem
+from dataset import (
+    TSEDatasetBuilder,
+    TSEDataLoader,
+    TSEPredictItem,
+    TSETrainItem,
+)
 
 
 class TrainArgs(BaseModel):
@@ -39,6 +44,18 @@ class TrainArgs(BaseModel):
         )
 
 
+def rms_loudness(signal: torch.Tensor) -> torch.Tensor:
+    return torch.sqrt(torch.mean(signal**2, dim=-1, keepdim=True))
+
+
+def loudness_loss(
+    estimated_signal: torch.Tensor, target_signal: torch.Tensor
+) -> torch.Tensor:
+    estimated_loudness = rms_loudness(estimated_signal)
+    target_loudness = rms_loudness(target_signal)
+    return (torch.abs(estimated_loudness - target_loudness)).mean()
+
+
 class TSEModule(LightningModule):
     def __init__(self, args: TrainArgs):
         super().__init__()
@@ -49,7 +66,7 @@ class TSEModule(LightningModule):
     def training_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y = self.model(TSEPredictItem(mix, ref))
-        loss = nn.functional.mse_loss(est_y, y)
+        loss = nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y)
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
@@ -58,7 +75,7 @@ class TSEModule(LightningModule):
     def validation_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y = self.model(TSEPredictItem(mix, ref))
-        loss = nn.functional.mse_loss(est_y, y)
+        loss = nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y)
         self.eval_loss_mean.update(loss)
 
     def on_validation_epoch_end(self):
