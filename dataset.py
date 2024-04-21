@@ -8,6 +8,7 @@ from typing import (
     Iterator,
     Generic,
     Sequence,
+    Optional,
 )
 import torch
 from torch.utils.data.dataloader import Dataset, DataLoader
@@ -102,12 +103,12 @@ class RandomDataset(SpeakerAudioProvider):
 
 class TSEWavDataset(SpeakerAudioProvider):
     @classmethod
-    def from_folder(cls, folder: str) -> "TSEWavDataset":
+    def from_folder(cls, folder: str, suffix: str = "") -> "TSEWavDataset":
         data = {}
 
         for spk in os.listdir(folder):
             if os.path.isdir(os.path.join(folder, spk)):
-                data.setdefault(spk, []).extend(
+                data.setdefault(spk + suffix, []).extend(
                     [
                         LazyLoadAudio(path)
                         for path in glob(os.path.join(folder, spk, "*.wav"))
@@ -170,8 +171,9 @@ class TSETrainItem:
             return cls(mix, ref, y)
 
     def to_file(self, path: Path):
-        with open(path, "wb") as f:
-            pickle.dump((self.mix, self.ref, self.y), f)
+        if not path.exists():
+            with open(path, "wb") as f:
+                pickle.dump((self.mix, self.ref, self.y), f)
 
 
 @dataclass
@@ -183,7 +185,7 @@ class LoadedTSEItem(LazyLoadable[TSETrainItem]):
 
 
 @dataclass
-class LazyLoadTSEItem(LazyLoadable[TSETrainItem]):
+class LazyLoadTSETrainItem(LazyLoadable[TSETrainItem]):
     path: str
 
     def load(self) -> TSETrainItem:
@@ -211,7 +213,7 @@ class TSEDataset(Dataset):
     @classmethod
     def from_folder(cls, p: Path) -> "TSEDataset":
         if p.exists() and p.is_dir():
-            items = [LazyLoadTSEItem(file) for file in glob(str(p / "*.pkl"))]
+            items = [LazyLoadTSETrainItem(file) for file in glob(str(p / "*.pkl"))]
             return cls(items)
         else:
             raise ValueError(
@@ -274,8 +276,8 @@ class TSEDatasetBuilder(Dataset):
 
     @staticmethod
     def __gen_mix(
-        spks: List[str], provider: SpeakerAudioProvider
-    ) -> List[LoadedTSEItem]:
+        spks: List[str], provider: SpeakerAudioProvider, out_folder: Optional[str]
+    ) -> List[LazyLoadable[TSETrainItem]]:
         spks = deepcopy(spks)
         spk_utts = {spk: list(provider.get_speaker_files(spk)) for spk in spks}
         res = []
@@ -323,12 +325,28 @@ class TSEDatasetBuilder(Dataset):
             mixed[..., y_start : y_start + y.len] += y.wav
             mixed[..., noise_start : noise_start + noise.len] += noise.wav
             # TODO add more distortions and background noises
-            res.append(LoadedTSEItem(TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)))
+            # - soft clipping
+            # - lossy compression
+            # - reverb
+            # - randomly sample from noise dataset
+            item = TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)
+            if out_folder is not None:
+                item_path = Path(out_folder) / ("%d.wav" % len(res))
+                item.to_file(item_path)
+                del item  # force free to prevent memory overflow
+                res.append(LazyLoadTSETrainItem(str(item_path)))
+            else:
+                res.append(LoadedTSEItem(item))
         return res
 
     @classmethod
     def from_provider(
-        cls, provider: SpeakerAudioProvider, args: TSEDatasetArgs
+        cls,
+        provider: SpeakerAudioProvider,
+        args: TSEDatasetArgs,
+        out_folder: Optional[
+            str
+        ] = None,  # if is not None, each time an item is created, it's written to the folder and removed from memory
     ) -> "TSEDatasetBuilder":
         # - each utterance is only used once
         # - train, eval, test speakers don't intersect
@@ -336,9 +354,9 @@ class TSEDatasetBuilder(Dataset):
         train_spk, eval_spk, test_spk = cls.__split(
             speakers, list(args.train_val_test_ratio)
         )
-        train_mix = cls.__gen_mix(train_spk, provider)
-        eval_mix = cls.__gen_mix(eval_spk, provider)
-        test_mix = cls.__gen_mix(test_spk, provider)
+        train_mix = cls.__gen_mix(train_spk, provider, out_folder)
+        eval_mix = cls.__gen_mix(eval_spk, provider, out_folder)
+        test_mix = cls.__gen_mix(test_spk, provider, out_folder)
 
         return cls(TSEDataset(train_mix), TSEDataset(eval_mix), TSEDataset(test_mix))
 

@@ -4,9 +4,17 @@ Example usage: python build_tse_dataset.py ../test_tse_raw_cn ../test_tse_raw_en
 """
 
 
+import os
 from pathlib import Path
-from dataset import TSEDatasetArgs, TSEDatasetBuilder, TSEWavDataset
-from typing import Iterable, Sequence, TypeVar, Dict
+from dataset import (
+    LazyLoadable,
+    TSEDatasetArgs,
+    TSEDatasetBuilder,
+    TSEWavDataset,
+    Audio,
+)
+from typing import Iterable, Sequence, TypeVar, Dict, List, Optional
+from random import choice, shuffle
 import click
 
 
@@ -24,6 +32,24 @@ def merge_dicts(ds: Iterable[Dict[K, Sequence[V]]]) -> Dict[K, Sequence[V]]:
     return merged_dict
 
 
+def draw_subset(
+    spk_utt_data: Dict[str, List[LazyLoadable[Audio]]],
+    num_utts: int,
+) -> Dict[str, Sequence[LazyLoadable[Audio]]]:
+    subset = {}
+    skps = list(spk_utt_data.keys())
+    for _ in range(num_utts):
+        key = choice(skps)
+        shuffle(spk_utt_data[key])
+        if key not in subset:
+            subset[key] = list()
+        subset[key].append(spk_utt_data[key].pop())
+        if len(spk_utt_data[key]) == 0:
+            skps.remove(key)
+            del spk_utt_data[key]
+    return subset
+
+
 @click.command()
 @click.argument(
     "src", nargs=-1, type=click.Path(exists=True, file_okay=False, dir_okay=True)
@@ -31,18 +57,19 @@ def merge_dicts(ds: Iterable[Dict[K, Sequence[V]]]) -> Dict[K, Sequence[V]]:
 @click.argument(
     "dst", nargs=1, type=click.Path(exists=False, file_okay=False, dir_okay=True)
 )
-def main(src: Iterable[str], dst: str):
+@click.option("--max_utts", type=int)
+def main(src: Iterable[str], dst: str, max_utts: Optional[int]):
     tse_wav_datasets = []
     for folder in src:
-        tse_wav_datasets.append(TSEWavDataset.from_folder(folder))
-    merged_tse_wav_dataset = TSEWavDataset(
-        merge_dicts(map(lambda v: v.data, tse_wav_datasets))
-    )
-    tse_dataset_set = TSEDatasetBuilder.from_provider(
-        merged_tse_wav_dataset, TSEDatasetArgs()
-    )
-
-    tse_dataset_set.to_folder(Path(dst))
+        tse_wav_datasets.append(
+            TSEWavDataset.from_folder(folder, suffix=os.path.basename(folder))
+        )
+    merged_spk_utts_dict = merge_dicts(map(lambda v: v.data, tse_wav_datasets))
+    if max_utts is not None:
+        merged_spk_utts_dict = draw_subset(merged_spk_utts_dict, max_utts)
+    merged_tse_wav_dataset = TSEWavDataset(merged_spk_utts_dict)
+    Path(dst).mkdir(parents=True, exist_ok=True)
+    _ = TSEDatasetBuilder.from_provider(merged_tse_wav_dataset, TSEDatasetArgs(), dst)
 
 
 if __name__ == "__main__":
