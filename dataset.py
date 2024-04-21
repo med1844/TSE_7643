@@ -23,6 +23,7 @@ import pickle
 from copy import deepcopy
 from pydantic import BaseModel
 from functools import partial
+from tqdm import tqdm
 
 
 T = TypeVar("T")
@@ -281,63 +282,134 @@ class TSEDatasetBuilder(Dataset):
         spks = deepcopy(spks)
         spk_utts = {spk: list(provider.get_speaker_files(spk)) for spk in spks}
         res = []
-        while len(spk_utts) >= 2 and (
-            any(len(v) >= 2 for v in spk_utts.values())
-            and sum_ge(map(len, spk_utts.values()), 3)
-        ):
-            y_spk = random.choice(spks)
-            if len(spk_utts[y_spk]) < 2:
-                continue
-            candidate_spk = [spk for spk in spks if spk != y_spk and spk_utts[spk]]
-            if not candidate_spk:
-                continue
-            d_spk = random.choice(candidate_spk)
-            # pick y, ref
-            random.shuffle(spk_utts[y_spk])
-            y = spk_utts[y_spk].pop().load()
-            ref = spk_utts[y_spk].pop().load()
-            if len(spk_utts[y_spk]) == 0:
-                del spk_utts[y_spk]
-                spks.remove(y_spk)
-            # pick noise
-            random.shuffle(spk_utts[d_spk])
-            noise = spk_utts[d_spk].pop().load()
-            if len(spk_utts[d_spk]) == 0:
-                del spk_utts[d_spk]
-                spks.remove(d_spk)
-            # determine loudness of y and noise
-            y_lufs = random.randint(-33, -25)
-            noise_lufs = random.randint(-33, -25)
-            # apply loudness
-            y.wav = normalize_loudness_torch(y.wav, 48000, y_lufs)
-            noise.wav = normalize_loudness_torch(noise.wav, 48000, noise_lufs)
-            # get some random start point in the noise
-            y_start = random.randint(-y.len, noise.len)
-            noise_start = 0
-            # normalize to ensure y_start and noise_start >= 0
-            if y_start < 0:
-                noise_start = -y_start
-                y_start = 0
-            end = max(y.len + y_start, noise.len + noise_start)
-            y_pad = torch.zeros(1, end)
-            y_pad[..., y_start : y_start + y.len] += y.wav
-            mixed = torch.zeros(1, end)
-            mixed[..., y_start : y_start + y.len] += y.wav
-            mixed[..., noise_start : noise_start + noise.len] += noise.wav
-            # TODO add more distortions and background noises
-            # - soft clipping
-            # - lossy compression
-            # - reverb
-            # - randomly sample from noise dataset
-            item = TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)
+
+        if out_folder is not None:
+            Path(out_folder).mkdir(parents=True, exist_ok=True)
+
+        def to_file(item: TSETrainItem) -> LazyLoadable[TSETrainItem]:
             if out_folder is not None:
-                item_path = Path(out_folder) / ("%d.wav" % len(res))
+                item_path = Path(out_folder) / ("%d.pkl" % len(res))
                 item.to_file(item_path)
                 del item  # force free to prevent memory overflow
-                res.append(LazyLoadTSETrainItem(str(item_path)))
+                return LazyLoadTSETrainItem(str(item_path))
             else:
-                res.append(LoadedTSEItem(item))
-        return res
+                return LoadedTSEItem(item)
+
+        num_utts = sum(len(files) for files in spk_utts.values())
+        with tqdm(total=num_utts) as pbar:
+            while len(spks) >= 2 and (
+                any(len(v) >= 2 for v in spk_utts.values())
+                and sum_ge(map(len, spk_utts.values()), 3)
+            ):
+                r = random.random()
+                if r < 0.8:
+                    # do normal mix, ref, y
+                    random.shuffle(spks)
+                    d_spk, y_spk = spks[-2:]
+                    if len(spk_utts[y_spk]) < 2:
+                        continue
+                    # pick y, ref
+                    random.shuffle(spk_utts[y_spk])
+                    y = spk_utts[y_spk].pop().load()
+                    ref = spk_utts[y_spk].pop().load()
+                    if len(spk_utts[y_spk]) == 0:
+                        del spk_utts[y_spk]
+                        spks.remove(y_spk)
+                    # pick noise
+                    random.shuffle(spk_utts[d_spk])
+                    noise = spk_utts[d_spk].pop().load()
+                    if len(spk_utts[d_spk]) == 0:
+                        del spk_utts[d_spk]
+                        spks.remove(d_spk)
+                    # determine loudness of y and noise
+                    y_lufs = random.randint(-33, -25)
+                    ref_lufs = random.randint(-33, -25)
+                    noise_lufs = random.randint(-33, -25)
+                    # apply loudness
+                    y.wav = normalize_loudness_torch(y.wav, y.fs, y_lufs)
+                    ref.wav = normalize_loudness_torch(ref.wav, ref.fs, ref_lufs)
+                    noise.wav = normalize_loudness_torch(
+                        noise.wav, noise.fs, noise_lufs
+                    )
+                    # get some random start point in the noise
+                    y_start = random.randint(-y.len, noise.len)
+                    noise_start = 0
+                    # normalize to ensure y_start and noise_start >= 0
+                    if y_start < 0:
+                        noise_start = -y_start
+                        y_start = 0
+                    end = max(y.len + y_start, noise.len + noise_start)
+                    y_pad = torch.zeros(1, end)
+                    y_pad[..., y_start : y_start + y.len] += y.wav
+                    mixed = torch.zeros(1, end)
+                    mixed[..., y_start : y_start + y.len] += y.wav
+                    mixed[..., noise_start : noise_start + noise.len] += noise.wav
+                    # TODO add more distortions and background noises
+                    # - soft clipping
+                    # - lossy compression
+                    # - reverb
+                    # - randomly sample from noise dataset
+                    res.append(to_file(TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)))
+                    pbar.update(3)
+                elif r < 0.9:
+                    # noise is empty, just y and ref, mix == y
+                    random.shuffle(spks)
+                    y_spk = spks[-1]
+                    if len(spk_utts[y_spk]) < 2:
+                        continue
+                    random.shuffle(spk_utts[y_spk])
+                    y = spk_utts[y_spk].pop().load()
+                    ref = spk_utts[y_spk].pop().load()
+                    if len(spk_utts[y_spk]) == 0:
+                        del spk_utts[y_spk]
+                        spks.remove(y_spk)
+                    y_lufs = random.randint(-33, -25)
+                    ref_lufs = random.randint(-33, -25)
+                    y.wav = normalize_loudness_torch(y.wav, y.fs, y_lufs)
+                    ref.wav = normalize_loudness_torch(ref.wav, ref.fs, ref_lufs)
+                    # normalize to ensure y_start and noise_start >= 0
+                    y_start = random.randint(-y.len // 2, y.len // 2)
+                    noise_start = 0
+                    if y_start < 0:
+                        noise_start = -y_start
+                        y_start = 0
+                    end = y.len + y_start
+                    y_pad = torch.zeros(1, end)
+                    y_pad[..., y_start : y_start + y.len] += y.wav
+                    mixed = torch.zeros(1, end)
+                    mixed[..., y_start : y_start + y.len] += y.wav
+                    res.append(to_file(TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)))
+                    pbar.update(2)
+                else:
+                    # y is empty, just ref and noise speaker...
+                    random.shuffle(spks)
+                    d_spk, y_spk = spks[-2:]
+                    random.shuffle(spk_utts[y_spk])
+                    ref = spk_utts[y_spk].pop().load()
+                    if len(spk_utts[y_spk]) == 0:
+                        del spk_utts[y_spk]
+                        spks.remove(y_spk)
+                    random.shuffle(spk_utts[d_spk])
+                    noise = spk_utts[d_spk].pop().load()
+                    if len(spk_utts[d_spk]) == 0:
+                        del spk_utts[d_spk]
+                        spks.remove(d_spk)
+                    y_len = random.randint(3 * ref.fs, 8 * ref.fs)
+                    y = Audio(torch.zeros((1, y_len)), ref.fs)
+                    ref_lufs = random.randint(-33, -25)
+                    ref.wav = normalize_loudness_torch(ref.wav, ref.fs, ref_lufs)
+                    y_start = random.randint(-y.len, noise.len)
+                    noise_start = 0
+                    if y_start < 0:
+                        noise_start = -y_start
+                        y_start = 0
+                    end = max(y.len + y_start, noise.len + noise_start)
+                    y_pad = torch.zeros(1, end)
+                    mixed = torch.zeros(1, end)
+                    mixed[..., noise_start : noise_start + noise.len] += noise.wav
+                    res.append(to_file(TSETrainItem(mix=mixed, ref=ref.wav, y=y_pad)))
+                    pbar.update(2)
+            return res
 
     @classmethod
     def from_provider(
@@ -354,9 +426,21 @@ class TSEDatasetBuilder(Dataset):
         train_spk, eval_spk, test_spk = cls.__split(
             speakers, list(args.train_val_test_ratio)
         )
-        train_mix = cls.__gen_mix(train_spk, provider, out_folder)
-        eval_mix = cls.__gen_mix(eval_spk, provider, out_folder)
-        test_mix = cls.__gen_mix(test_spk, provider, out_folder)
+        train_mix = cls.__gen_mix(
+            train_spk,
+            provider,
+            None if out_folder is None else os.path.join(out_folder, "tr"),
+        )
+        eval_mix = cls.__gen_mix(
+            eval_spk,
+            provider,
+            None if out_folder is None else os.path.join(out_folder, "ev"),
+        )
+        test_mix = cls.__gen_mix(
+            test_spk,
+            provider,
+            None if out_folder is None else os.path.join(out_folder, "ts"),
+        )
 
         return cls(TSEDataset(train_mix), TSEDataset(eval_mix), TSEDataset(test_mix))
 
@@ -422,11 +506,11 @@ if __name__ == "__main__":
         ax.set(title=title)
 
     tse_train, tse_eval, tse_test = TSEDatasetBuilder.from_folder(Path(sys.argv[1]))
-    loader = TSEDataLoader(tse_train, batch_size=8, shuffle=True)
+    loader = TSEDataLoader(240, tse_train, batch_size=8, shuffle=True)
     for padded_x_hat, padded_ref, padded_y_hat in loader:
-        fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(20, 8))
+        fig, axes = plt.subplots(nrows=8, ncols=4, figsize=(20, 16))
 
-        for i in range(4):
+        for i in range(8):
             x_hat = padded_x_hat[i].numpy()
             y_hat = padded_y_hat[i].numpy()
             dirty = x_hat - y_hat

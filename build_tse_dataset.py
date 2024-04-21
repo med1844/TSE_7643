@@ -15,6 +15,7 @@ from dataset import (
 )
 from typing import Iterable, Sequence, TypeVar, Dict, List, Optional
 from random import choice, shuffle
+from tqdm import tqdm
 import click
 
 
@@ -60,7 +61,7 @@ def draw_subset(
 @click.option("--max_utts", type=int)
 def main(src: Iterable[str], dst: str, max_utts: Optional[int]):
     tse_wav_datasets = []
-    for folder in src:
+    for folder in tqdm(src):
         tse_wav_datasets.append(
             TSEWavDataset.from_folder(folder, suffix=os.path.basename(folder))
         )
@@ -68,7 +69,6 @@ def main(src: Iterable[str], dst: str, max_utts: Optional[int]):
     if max_utts is not None:
         merged_spk_utts_dict = draw_subset(merged_spk_utts_dict, max_utts)
     merged_tse_wav_dataset = TSEWavDataset(merged_spk_utts_dict)
-    Path(dst).mkdir(parents=True, exist_ok=True)
     _ = TSEDatasetBuilder.from_provider(merged_tse_wav_dataset, TSEDatasetArgs(), dst)
 
 
