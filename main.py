@@ -8,6 +8,8 @@ from lightning.pytorch import LightningModule
 from lightning.pytorch.trainer import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
+from torchmetrics.audio import ScaleInvariantSignalNoiseRatio
+
 from pydantic import BaseModel
 import click
 from modules.adapted_wavlm import AdaptedWavLMArgs
@@ -20,6 +22,12 @@ from dataset import (
     TSETrainItem,
 )
 
+
+device = torch.device("cpu")
+
+if torch.cuda.is_available():
+   print("Training on GPU")
+   device = torch.device("cuda:0")
 
 class TrainArgs(BaseModel):
     exp_name: str
@@ -75,8 +83,15 @@ class TSEModule(LightningModule):
     def validation_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y = self.model(TSEPredictItem(mix, ref))
-        loss = nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y)
-        self.eval_loss_mean.update(loss)
+        si_snr = ScaleInvariantSignalNoiseRatio().to(device)
+        #! use ref or y here?
+        si_snr_loss = si_snr(est_y, y)
+        l1_loss = nn.functional.l1_loss(est_y, y)
+        loudness_loss_val = loudness_loss(est_y, y)
+        # loss = nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y)
+        total_loss = si_snr_loss + l1_loss + loudness_loss_val
+        self.eval_loss_mean.update(total_loss)
+        self.log("val_loss", total_loss, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self):
         avg_loss = self.eval_loss_mean.compute()
