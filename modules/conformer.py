@@ -205,12 +205,14 @@ class ConformerBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        c: torch.Tensor,
         pos_k: Optional[torch.Tensor],
         mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
         """Compute encoded features.
 
         :param torch.Tensor x: encoded source features (batch, max_time_in, size)
+        :param torch.Tensor c: conditional features (batch, max_time_in, c_dim)
         :param torch.Tensor mask: mask for x (batch, max_time_in)
         :rtype: Tuple[torch.Tensor, torch.Tensor]
         """
@@ -269,7 +271,7 @@ class ConformerEncoder(nn.Module):
             ]
         )
 
-    def forward(self, xs: torch.Tensor, masks: Optional[torch.Tensor]):
+    def forward(self, xs: torch.Tensor, c: torch.Tensor, masks: Optional[torch.Tensor]):
         xs = self.embed(xs)
 
         if self.pos_emb is not None:
