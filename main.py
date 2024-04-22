@@ -8,8 +8,9 @@ from lightning.pytorch import LightningModule
 from lightning.pytorch.trainer import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from torchmetrics.audio import ScaleInvariantSignalNoiseRatio
-
+from torchmetrics.functional.audio.snr import (
+    scale_invariant_signal_noise_ratio as si_snr,
+)
 from pydantic import BaseModel
 import click
 from modules.adapted_wavlm import AdaptedWavLMArgs
@@ -22,12 +23,6 @@ from dataset import (
     TSETrainItem,
 )
 
-
-device = torch.device("cpu")
-
-if torch.cuda.is_available():
-   print("Training on GPU")
-   device = torch.device("cuda:0")
 
 class TrainArgs(BaseModel):
     exp_name: str
@@ -74,7 +69,9 @@ class TSEModule(LightningModule):
     def training_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y = self.model(TSEPredictItem(mix, ref))
-        loss = nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y)
+        loss = (
+            nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y) + si_snr(est_y, y)
+        )
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
@@ -83,15 +80,13 @@ class TSEModule(LightningModule):
     def validation_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y = self.model(TSEPredictItem(mix, ref))
-        si_snr = ScaleInvariantSignalNoiseRatio().to(device)
         #! use ref or y here?
+        # use y since we want to know how well TSE works against ground truth
         si_snr_loss = si_snr(est_y, y)
         l1_loss = nn.functional.l1_loss(est_y, y)
         loudness_loss_val = loudness_loss(est_y, y)
-        # loss = nn.functional.l1_loss(est_y, y) + loudness_loss(est_y, y)
         total_loss = si_snr_loss + l1_loss + loudness_loss_val
         self.eval_loss_mean.update(total_loss)
-        self.log("val_loss", total_loss, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self):
         avg_loss = self.eval_loss_mean.compute()
