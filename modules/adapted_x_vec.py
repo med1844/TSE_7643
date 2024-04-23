@@ -19,13 +19,13 @@ class AdaptedXVector(nn.Module):
             run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"},
         )
         self.x_vector.eval()
-        self.adaptor = nn.Sequential(
-            nn.Linear(512, args.hidden_size),
-            nn.LayerNorm(args.hidden_size),
-            Swish(),
-            nn.Linear(args.hidden_size, args.out_size),
-            nn.LayerNorm(args.out_size),
-        )
+        # self.adaptor = nn.Sequential(
+        #     nn.Linear(512, args.hidden_size),
+        #     nn.LayerNorm(args.hidden_size),
+        #     Swish(),
+        #     nn.Linear(args.hidden_size, args.out_size),
+        #     nn.LayerNorm(args.out_size),
+        # )
 
     def forward(self, ref: torch.Tensor) -> torch.Tensor:
         """
@@ -36,4 +36,5 @@ class AdaptedXVector(nn.Module):
         """
         with torch.no_grad():
             spk_emb = self.x_vector.encode_batch(ref)
-        return self.adaptor(spk_emb)
+        return spk_emb
+        # return self.adaptor(spk_emb)

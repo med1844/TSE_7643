@@ -212,13 +212,11 @@ class TSEDataset(Dataset):
     def __getitem__(self, index: int) -> TSETrainItem:
         mix, ref, y = self.items[index].load()
         item_len = mix.shape[-1]
-        assert item_len >= self.segment_len
-        start = random.randint(0, item_len - self.segment_len)
-        return TSETrainItem(
-            mix=mix[..., start : start + self.segment_len],
-            ref=ref,
-            y=y[..., start : start + self.segment_len],
-        )
+        if item_len >= self.segment_len:
+            start = random.randint(0, item_len - self.segment_len)
+            mix = mix[..., start : start + self.segment_len]
+            y = y[..., start : start + self.segment_len]
+        return TSETrainItem(mix, ref, y)
 
     def to_folder(self, p: Path):
         if p.exists() and p.is_dir():

@@ -64,12 +64,17 @@ class TSEModule(LightningModule):
 
     def training_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
-        est_y = self.model(TSEPredictItem(mix, ref))
+        est_y_spec = self.model(TSEPredictItem(mix, ref))
+        # TODO use y_spec to calculate loss?
         loss = (
             nn.functional.l1_loss(est_y, y)
             + loudness_loss(est_y, y)
             - si_snr(est_y, y).mean()
         )
+
+        if torch.isnan(loss):
+            print("nan detected!")
+            exit()
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
