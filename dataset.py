@@ -198,15 +198,27 @@ class LazyLoadTSETrainItem(LazyLoadable[TSETrainItem]):
 
 
 class TSEDataset(Dataset):
-    def __init__(self, items: Sequence[LazyLoadable[TSETrainItem]]) -> None:
+    def __init__(
+        self, items: Sequence[LazyLoadable[TSETrainItem]], segment_len: int = 5 * 48000
+    ) -> None:
         super().__init__()
         self.items = items
+        # to reduce GPU pressure (see conformer block attention), we use random 5 second segment to train
+        self.segment_len = segment_len
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, index: int) -> TSETrainItem:
-        return self.items[index].load()
+        mix, ref, y = self.items[index].load()
+        item_len = mix.shape[-1]
+        assert item_len >= self.segment_len
+        start = random.randint(0, item_len - self.segment_len)
+        return TSETrainItem(
+            mix=mix[..., start : start + self.segment_len],
+            ref=ref,
+            y=y[..., start : start + self.segment_len],
+        )
 
     def to_folder(self, p: Path):
         if p.exists() and p.is_dir():

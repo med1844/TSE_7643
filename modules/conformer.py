@@ -83,8 +83,11 @@ class AttnBiasMHA(nn.Module):
         v = self.linear_v(x).view(n_batch, -1, self.h, self.d_k)
         A = torch.einsum("bthd,bshd->bhts", q, k)
         if pos_k is not None:
-            pos_k = pos_k.unsqueeze(0)
-            B = torch.einsum("bhtd,hpsd->bhps", q, pos_k)
+            reshape_q = (
+                q.contiguous().view(n_batch * self.h, -1, self.d_k).transpose(0, 1)
+            )
+            B = torch.matmul(reshape_q, pos_k.transpose(-2, -1))
+            B = B.transpose(0, 1).view(n_batch, self.h, pos_k.size(0), pos_k.size(1))
             scores = (A + B) / math.sqrt(self.d_k)
         else:
             scores = A / math.sqrt(self.d_k)
@@ -154,7 +157,10 @@ class ConvModule(nn.Module):
         x = self.dw_conv_1d(x)
         if self.causal:
             x = x[:, :, : -(self.kernel_size - 1)]
+        # change from batchnorm to layernorm due to schedulefree caveat
+        x = x.permute([0, 2, 1])
         x = self.layer_norm(x)
+        x = x.permute([0, 2, 1])
         x = self.act(x)
         x = x.unsqueeze(1).permute([0, 1, 3, 2])
         x = self.pw_conv_2(x)

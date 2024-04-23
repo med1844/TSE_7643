@@ -15,6 +15,7 @@ class MaskPredictorArgs(BaseModel):
     num_conformer_blocks: int = 16
     wavlm_dim: int = 768
     fft_dim: int = 2048
+    attn_dim: int = 256
 
     @property
     def real_fft_dim(self) -> int:
@@ -27,7 +28,17 @@ class MaskPredictor(nn.Module):
     def __init__(self, args: MaskPredictorArgs) -> None:
         super().__init__()
         self.conformer = ConformerEncoder(
-            args.real_fft_dim, args.wavlm_dim, num_blocks=args.num_conformer_blocks
+            args.real_fft_dim,
+            args.wavlm_dim,
+            args.attn_dim,
+            num_blocks=args.num_conformer_blocks,
+        )
+        self.fcn = nn.Sequential(
+            nn.Linear(args.attn_dim, args.attn_dim),
+            nn.LayerNorm(args.attn_dim),
+            nn.ReLU(),
+            nn.Linear(args.attn_dim, args.real_fft_dim),
+            nn.Softplus(),
         )
 
     def forward(self, adapted_wavlm_feature: torch.Tensor, mix_mag: torch.Tensor):
@@ -41,4 +52,4 @@ class MaskPredictor(nn.Module):
         - https://arxiv.org/abs/2211.09988 for feature/spectrogram concatenation
         - https://arxiv.org/abs/2211.00482 for conditioning
         """
-        return self.conformer(mix_mag, adapted_wavlm_feature)
+        return self.fcn(self.conformer(mix_mag, adapted_wavlm_feature))

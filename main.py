@@ -80,11 +80,12 @@ class TSEModule(LightningModule):
         est_y = self.model(TSEPredictItem(mix, ref))
         #! use ref or y here?
         # use y since we want to know how well TSE works against ground truth
-        si_snr_loss = si_snr(est_y, y).mean()
-        l1_loss = nn.functional.l1_loss(est_y, y)
-        loudness_loss_val = loudness_loss(est_y, y)
-        total_loss = l1_loss + loudness_loss_val - si_snr_loss
-        self.eval_loss_mean.update(total_loss)
+        loss = (
+            nn.functional.l1_loss(est_y, y)
+            + loudness_loss(est_y, y)
+            - si_snr(est_y, y).mean()
+        )
+        self.eval_loss_mean.update(loss)
 
     def on_validation_epoch_end(self):
         avg_loss = self.eval_loss_mean.compute()
