@@ -21,7 +21,7 @@ from dataset import (
     TSEPredictItem,
     TSETrainItem,
 )
-from audio_commons import STFTArgs, Spectrogram
+from audio_commons import Spectrogram
 
 
 class TrainArgs(BaseModel):

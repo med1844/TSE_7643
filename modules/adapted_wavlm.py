@@ -143,13 +143,12 @@ class AdaptedWavLM(nn.Module):
     def __init__(self, args: AdaptedWavLMArgs, device=None):
         super().__init__()
         self.wavlm_base_plus = WavLMBasePlus(device=device)
-        # self.adaptation_layers = nn.ModuleList(
-        #     [
-        #         AdaptedTransformerSentenceEncoderLayer(args.spk_emb_dim)
-        #         for _ in range(args.num_adaptation_layers)
-        #     ]
-        # )
-        self.example_fcn = nn.Linear(512, self.wavlm_base_plus.hidden_dim)
+        self.adaptation_layers = nn.ModuleList(
+            [
+                AdaptedTransformerSentenceEncoderLayer(args.spk_emb_dim)
+                for _ in range(args.num_adaptation_layers)
+            ]
+        )
 
     def forward(self, mix: torch.Tensor, spk_emb: torch.Tensor) -> torch.Tensor:
         """
@@ -162,21 +161,19 @@ class AdaptedWavLM(nn.Module):
         - https://arxiv.org/abs/2211.00482
         - https://github.com/sinhat98/adapter-wavlm/blob/main/modeling.py
         """
-        # model = self.wavlm_base_plus.model
-        # features = model.feature_extractor(mix)
-        # features = features.transpose(1, 2)
-        # features = model.layer_norm(features)
+        model = self.wavlm_base_plus.model
+        features = model.feature_extractor(mix)
+        features = features.transpose(1, 2)
+        features = model.layer_norm(features)
 
-        # if model.post_extract_proj is not None:
-        #     features = model.post_extract_proj(features)
+        if model.post_extract_proj is not None:
+            features = model.post_extract_proj(features)
 
-        # features = model.dropout_input(features)
+        features = model.dropout_input(features)
 
-        # # put adaptation layer here
-        # for layer in self.adaptation_layers:
-        #     features = layer(features, spk_emb)
+        # put adaptation layer here
+        for layer in self.adaptation_layers:
+            features = layer(features, spk_emb)
 
-        # x, _ = model.encoder(features)
-        # return x
-
-        return self.example_fcn(spk_emb) + self.wavlm_base_plus(mix)
+        x, _ = model.encoder(features)
+        return x

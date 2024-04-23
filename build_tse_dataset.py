@@ -5,7 +5,6 @@ Example usage: python build_tse_dataset.py ../test_tse_raw_cn ../test_tse_raw_en
 
 
 import os
-from pathlib import Path
 from dataset import (
     LazyLoadable,
     TSEDatasetArgs,
