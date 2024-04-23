@@ -26,6 +26,7 @@ speechbrain = "0.5.16"
 pydantic = "^2.6.4"
 lightning = "^2.2.1"
 pyloudnorm = "^0.1.1"
+schedulefree = "^1.2.5"
 
 [build-system]
 requires = ["poetry-core"]

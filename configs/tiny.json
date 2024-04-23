@@ -7,7 +7,7 @@
         "spk_emb_dim": 512,
         "num_wavlm_adapt_layers": 1,
         "x_vec_adaptor_hidden_size": 512,
-        "num_mask_pred_conformer_blocks": 16
+        "num_mask_pred_conformer_blocks": 1
     },
     "learning_rate": 0.0002,
     "adamw_betas": [

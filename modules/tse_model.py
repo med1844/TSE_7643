@@ -21,7 +21,7 @@ class STFTArgs(BaseModel):
 
 
 class TSEModelArgs(BaseModel):
-    n_fft: int = 2048
+    win_size: int = 1200
     spk_emb_dim: int = 512
     num_wavlm_adapt_layers: int = 1
     x_vec_adaptor_hidden_size: int = 512
@@ -44,14 +44,12 @@ class TSEModelArgs(BaseModel):
     def mask_predictor_args(self) -> MaskPredictorArgs:
         return MaskPredictorArgs(
             num_conformer_blocks=self.num_mask_pred_conformer_blocks,
-            fft_dim=self.n_fft,
+            fft_dim=self.win_size,
         )
 
     @property
     def stft_args(self) -> STFTArgs:
-        return STFTArgs(
-            n_fft=self.n_fft,
-        )
+        return STFTArgs(win_size=self.win_size)
 
 
 class TSEModel(nn.Module):

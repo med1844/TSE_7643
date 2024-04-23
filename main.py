@@ -13,9 +13,7 @@ from torchmetrics.functional.audio.snr import (
 )
 from pydantic import BaseModel
 import click
-from modules.adapted_wavlm import AdaptedWavLMArgs
-from modules.adapted_x_vec import AdaptedXVectorArgs
-from modules.mask_predictor import MaskPredictorArgs
+from schedulefree import AdamWScheduleFree
 from modules.tse_model import TSEModelArgs, TSEModel
 from dataset import (
     TSEDatasetBuilder,
@@ -94,15 +92,12 @@ class TSEModule(LightningModule):
         self.eval_loss_mean.reset()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
+        optimizer = AdamWScheduleFree(
             self.parameters(),
             lr=self.args.learning_rate,
             betas=self.args.adamw_betas,
         )
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(
-            optimizer, gamma=self.args.lr_decay
-        )
-        return [optimizer], [scheduler]
+        return optimizer
 
 
 def train(args: TrainArgs, dataset_path: str):

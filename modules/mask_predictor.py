@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from modules.conformer import ConformerBlock, ConformerEncoder
+from modules.conformer import ConformerEncoder
 from pydantic import BaseModel
 import torch.nn.functional as F
 

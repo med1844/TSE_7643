@@ -139,7 +139,7 @@ class ConvModule(nn.Module):
                 padding=(kernel_size - 1) // 2,
                 groups=input_dim,
             )
-        self.BN = nn.BatchNorm1d(input_dim)
+        self.layer_norm = nn.LayerNorm(input_dim)
         self.act = nn.ReLU()
         self.pw_conv_2 = nn.Conv2d(1, 1, 1, 1, 0)
         self.dropout = nn.Dropout(dropout_rate)
@@ -154,7 +154,7 @@ class ConvModule(nn.Module):
         x = self.dw_conv_1d(x)
         if self.causal:
             x = x[:, :, : -(self.kernel_size - 1)]
-        x = self.BN(x)
+        x = self.layer_norm(x)
         x = self.act(x)
         x = x.unsqueeze(1).permute([0, 1, 3, 2])
         x = self.pw_conv_2(x)
@@ -246,7 +246,7 @@ class ConformerEncoder(nn.Module):
         attention_dim=256,
         attention_heads=4,
         linear_units=1024,
-        num_blocks=3,
+        num_blocks=16,
         kernel_size=33,
         dropout_rate=0.1,
         causal=False,
