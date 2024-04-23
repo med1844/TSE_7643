@@ -3,16 +3,11 @@
     "epochs": 10,
     "batch_size": 16,
     "tse_args": {
-        "adapted_wavlm_args": {},
-        "adapted_x_vec_args": {
-            "hidden_size": 512,
-            "out_size": 512
-        },
-        "stft_args": {
-            "n_fft": 2048,
-            "hop_size": 240,
-            "win_size": 1200
-        }
+        "n_fft": 2048,
+        "spk_emb_dim": 512,
+        "num_wavlm_adapt_layers": 1,
+        "x_vec_adaptor_hidden_size": 512,
+        "num_mask_pred_conformer_blocks": 16
     },
     "learning_rate": 0.0002,
     "adamw_betas": [

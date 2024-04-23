@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import click
 from modules.adapted_wavlm import AdaptedWavLMArgs
 from modules.adapted_x_vec import AdaptedXVectorArgs
+from modules.mask_predictor import MaskPredictorArgs
 from modules.tse_model import TSEModelArgs, TSEModel
 from dataset import (
     TSEDatasetBuilder,
@@ -39,10 +40,7 @@ class TrainArgs(BaseModel):
             exp_name="tse",
             epochs=10,
             batch_size=16,
-            tse_args=TSEModelArgs(
-                adapted_wavlm_args=AdaptedWavLMArgs(),
-                adapted_x_vec_args=AdaptedXVectorArgs(),
-            ),
+            tse_args=TSEModelArgs(),
             learning_rate=2e-4,
         )
 

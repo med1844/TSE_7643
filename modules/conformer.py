@@ -246,7 +246,7 @@ class ConformerEncoder(nn.Module):
         attention_dim=256,
         attention_heads=4,
         linear_units=1024,
-        num_blocks=16,
+        num_blocks=3,
         kernel_size=33,
         dropout_rate=0.1,
         causal=False,

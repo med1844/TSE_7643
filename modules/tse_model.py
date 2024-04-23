@@ -21,9 +21,37 @@ class STFTArgs(BaseModel):
 
 
 class TSEModelArgs(BaseModel):
-    adapted_wavlm_args: AdaptedWavLMArgs
-    adapted_x_vec_args: AdaptedXVectorArgs
-    stft_args: STFTArgs = STFTArgs()
+    n_fft: int = 2048
+    spk_emb_dim: int = 512
+    num_wavlm_adapt_layers: int = 1
+    x_vec_adaptor_hidden_size: int = 512
+    num_mask_pred_conformer_blocks: int = 16
+
+    @property
+    def adapted_wavlm_args(self) -> AdaptedWavLMArgs:
+        return AdaptedWavLMArgs(
+            spk_emb_dim=self.spk_emb_dim,
+            num_adaptation_layers=self.num_wavlm_adapt_layers,
+        )
+
+    @property
+    def adapted_x_vec_args(self) -> AdaptedXVectorArgs:
+        return AdaptedXVectorArgs(
+            hidden_size=self.x_vec_adaptor_hidden_size, out_size=self.spk_emb_dim
+        )
+
+    @property
+    def mask_predictor_args(self) -> MaskPredictorArgs:
+        return MaskPredictorArgs(
+            num_conformer_blocks=self.num_mask_pred_conformer_blocks,
+            fft_dim=self.n_fft,
+        )
+
+    @property
+    def stft_args(self) -> STFTArgs:
+        return STFTArgs(
+            n_fft=self.n_fft,
+        )
 
 
 class TSEModel(nn.Module):
@@ -32,11 +60,7 @@ class TSEModel(nn.Module):
         self.args = args
         self.adapted_wavlm = AdaptedWavLM(args.adapted_wavlm_args)
         self.adapted_x_vec = AdaptedXVector(args.adapted_x_vec_args)
-        self.mask_predictor = MaskPredictor(
-            MaskPredictorArgs(
-                wavlm_dim=WavLMConfig().hidden_size, fft_dim=args.stft_args.win_size
-            )
-        )
+        self.mask_predictor = MaskPredictor(args.mask_predictor_args)
 
     def forward(self, batch: TSEPredictItem) -> torch.Tensor:
         mix, ref = batch

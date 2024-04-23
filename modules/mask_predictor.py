@@ -12,9 +12,9 @@ class MaskPredictorArgs(BaseModel):
         fft_dim: the fft would have shape B x T x fft_dim
     """
 
-    wavlm_dim: int
-    fft_dim: int
-    # add model specific parameters here, e.g. num_conformer_blocks
+    num_conformer_blocks: int = 16
+    wavlm_dim: int = 768
+    fft_dim: int = 2048
 
     @property
     def real_fft_dim(self) -> int:
@@ -26,7 +26,9 @@ class MaskPredictorArgs(BaseModel):
 class MaskPredictor(nn.Module):
     def __init__(self, args: MaskPredictorArgs) -> None:
         super().__init__()
-        self.conformer = ConformerEncoder(args.real_fft_dim, args.wavlm_dim)
+        self.conformer = ConformerEncoder(
+            args.real_fft_dim, args.wavlm_dim, num_blocks=args.num_conformer_blocks
+        )
 
     def forward(self, adapted_wavlm_feature: torch.Tensor, mix_mag: torch.Tensor):
         """
