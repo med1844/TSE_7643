@@ -1,4 +1,4 @@
-from typing import BinaryIO, Tuple, Union, Optional, List
+from typing import BinaryIO, Tuple, Union, Optional, List, Iterable
 import torch
 import torchaudio
 from PIL import Image
@@ -7,6 +7,58 @@ import io
 from librosa.filters import mel as librosa_mel_fn
 import numpy as np
 import pyloudnorm
+from pydantic import BaseModel
+from dataclasses import dataclass
+
+
+class STFTArgs(BaseModel):
+    n_fft: int = 2048
+    hop_size: int = 240
+    win_size: int = 1200
+
+    @property
+    def window(self) -> torch.Tensor:
+        return torch.hann_window(self.win_size)
+
+
+@dataclass
+class Spectrogram:
+    spec: torch.Tensor
+    phase: torch.Tensor
+
+    @classmethod
+    def from_wav(cls, stft_args: STFTArgs, wav: torch.Tensor):
+        window = stft_args.window.to(wav.device)
+        wav_stft = torch.stft(
+            wav,
+            n_fft=stft_args.win_size,
+            hop_length=stft_args.hop_size,
+            win_length=stft_args.win_size,
+            window=window,
+            return_complex=True,
+        )
+        wav_stft = torch.einsum("bnt -> btn", wav_stft)
+        wav_mag = wav_stft.abs()
+        wav_phase = wav_stft.angle()
+        wav_spec = torch.log(wav_mag**2).clamp_min(-100)
+        return cls(wav_spec, wav_phase)
+
+    def to_wav(self, stft_args: STFTArgs) -> torch.Tensor:
+        copy_spec = self.spec.clone()
+        copy_spec[copy_spec <= -100] = -torch.inf
+        copy_mag = torch.sqrt(torch.exp(copy_spec))
+        spectrum = torch.einsum("btn -> bnt", torch.polar(copy_mag, self.phase))
+        wav = torch.istft(
+            spectrum,
+            n_fft=stft_args.win_size,
+            hop_length=stft_args.hop_size,
+            win_length=stft_args.win_size,
+            window=stft_args.window.to(copy_mag.device),
+        )
+        return wav
+
+    def __iter__(self) -> Iterable[torch.Tensor]:
+        return iter((self.spec, self.phase))
 
 
 def read_wav_at_fs(

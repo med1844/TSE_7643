@@ -21,6 +21,7 @@ from dataset import (
     TSEPredictItem,
     TSETrainItem,
 )
+from audio_commons import STFTArgs, Spectrogram
 
 
 class TrainArgs(BaseModel):
@@ -65,13 +66,8 @@ class TSEModule(LightningModule):
     def training_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y_spec = self.model(TSEPredictItem(mix, ref))
-        # TODO use y_spec to calculate loss?
-        loss = (
-            nn.functional.l1_loss(est_y, y)
-            + loudness_loss(est_y, y)
-            - si_snr(est_y, y).mean()
-        )
-
+        y_spec = Spectrogram.from_wav(self.args.tse_args.stft_args, y)
+        loss = nn.functional.l1_loss(est_y_spec.spec, y_spec.spec)
         if torch.isnan(loss):
             print("nan detected!")
             exit()
@@ -82,14 +78,11 @@ class TSEModule(LightningModule):
 
     def validation_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
-        est_y = self.model(TSEPredictItem(mix, ref))
+        est_y_spec = self.model(TSEPredictItem(mix, ref))
         #! use ref or y here?
         # use y since we want to know how well TSE works against ground truth
-        loss = (
-            nn.functional.l1_loss(est_y, y)
-            + loudness_loss(est_y, y)
-            - si_snr(est_y, y).mean()
-        )
+        est_y = est_y_spec.to_wav(self.args.tse_args.stft_args)
+        loss = -si_snr(est_y, y).mean()
         self.eval_loss_mean.update(loss)
 
     def on_validation_epoch_end(self):
