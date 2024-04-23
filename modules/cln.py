@@ -7,7 +7,7 @@ class SCLN(nn.Module):
     """Speaker Condition Layer Normalization"""
 
     def __init__(self, s_size: int, hidden_size: int, eps=1e-8, bias=False):
-        super(SCLN, self).__init__()
+        super().__init__()
         self.hidden_size = hidden_size
         self.affine_layer = nn.Linear(
             s_size,
@@ -20,7 +20,7 @@ class SCLN(nn.Module):
         """
         Args:
             x: B x T x hidden_size tensor
-            spk_emb: B x 1 x s_size tensor
+            spk_emb: B x 1 x s_size or B x T x s_size tensor
         Returns:
             condition layer normalized x: B x T x hidden_size tensor
         """

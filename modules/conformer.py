@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 import numpy
+from modules.cln import SCLN
 
 
 class RelativePositionalEncoding(nn.Module):
@@ -39,7 +40,9 @@ class AttnBiasMHA(nn.Module):
 
     """
 
-    def __init__(self, n_head: int, n_feat: int, dropout_rate: float) -> None:
+    def __init__(
+        self, n_head: int, n_feat: int, d_cond: int, dropout_rate: float
+    ) -> None:
         """Construct an MultiHeadedAttention object."""
         super().__init__()
         assert n_feat % n_head == 0
@@ -55,9 +58,12 @@ class AttnBiasMHA(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout_rate)
 
+        self.linear_cond = nn.Linear(d_cond, n_feat)
+
     def forward(
         self,
         x: torch.Tensor,
+        cond: torch.Tensor,
         pos_k: Optional[torch.Tensor],
         mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
@@ -70,12 +76,15 @@ class AttnBiasMHA(nn.Module):
         """
         n_batch = x.size(0)
         x = self.layer_norm(x)
-        q = self.linear_q(x).view(n_batch, -1, self.h, self.d_k)  # (b, t, d)
+        q = self.linear_q(self.linear_cond(cond)).view(
+            n_batch, -1, self.h, self.d_k
+        )  # (b, t, d)
         k = self.linear_k(x).view(n_batch, -1, self.h, self.d_k)  # (b, t, d)
         v = self.linear_v(x).view(n_batch, -1, self.h, self.d_k)
         A = torch.einsum("bthd,bshd->bhts", q, k)
         if pos_k is not None:
-            B = torch.einsum("bhtd,dps->bhps", q, pos_k)
+            pos_k = pos_k.unsqueeze(0)
+            B = torch.einsum("bhtd,hpsd->bhps", q, pos_k)
             scores = (A + B) / math.sqrt(self.d_k)
         else:
             scores = A / math.sqrt(self.d_k)
@@ -190,6 +199,7 @@ class ConformerBlock(nn.Module):
         d_model: int,
         n_head: int,
         d_ffn: int,
+        d_cond: int,
         kernel_size: int,
         dropout_rate: float,
         causal: bool = False,
@@ -197,10 +207,10 @@ class ConformerBlock(nn.Module):
         """Construct an EncoderLayer object."""
         super().__init__()
         self.feed_forward_in = FeedForward(d_model, d_ffn, dropout_rate)
-        self.self_attn = AttnBiasMHA(n_head, d_model, dropout_rate)
+        self.self_attn = AttnBiasMHA(n_head, d_model, d_cond, dropout_rate)
         self.conv = ConvModule(d_model, kernel_size, dropout_rate, causal=causal)
         self.feed_forward_out = FeedForward(d_model, d_ffn, dropout_rate)
-        self.layer_norm = nn.LayerNorm(d_model)
+        self.layer_norm = SCLN(d_cond, d_model)
 
     def forward(
         self,
@@ -217,11 +227,11 @@ class ConformerBlock(nn.Module):
         :rtype: Tuple[torch.Tensor, torch.Tensor]
         """
         x = x + 0.5 * self.feed_forward_in(x)
-        x = x + self.self_attn(x, pos_k, mask)
+        x = x + self.self_attn(x, c, pos_k, mask)
         x = x + self.conv(x)
         x = x + 0.5 * self.feed_forward_out(x)
 
-        out = self.layer_norm(x)
+        out = self.layer_norm(x, c)
 
         return out
 
@@ -232,6 +242,7 @@ class ConformerEncoder(nn.Module):
     def __init__(
         self,
         idim: int,
+        cond_dim: int,
         attention_dim=256,
         attention_heads=4,
         linear_units=1024,
@@ -263,6 +274,7 @@ class ConformerEncoder(nn.Module):
                     attention_dim,
                     attention_heads,
                     linear_units,
+                    cond_dim,
                     kernel_size,
                     dropout_rate,
                     causal=causal,
@@ -271,7 +283,17 @@ class ConformerEncoder(nn.Module):
             ]
         )
 
-    def forward(self, xs: torch.Tensor, c: torch.Tensor, masks: Optional[torch.Tensor]):
+    def forward(
+        self, xs: torch.Tensor, c: torch.Tensor, masks: Optional[torch.Tensor] = None
+    ):
+        """
+        Args:
+            xs: B x T x idim tensor
+            c: B x T x cond_ tensor
+        Returns:
+            condition layer normalized x: B x T x hidden_size tensor
+        """
+
         xs = self.embed(xs)
 
         if self.pos_emb is not None:
@@ -282,6 +304,6 @@ class ConformerEncoder(nn.Module):
         else:
             pos_k = None
         for layer in self.encoders:
-            xs = layer(xs, pos_k, masks)
+            xs = layer(xs, c, pos_k, masks)
 
         return xs
