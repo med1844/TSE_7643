@@ -27,6 +27,7 @@ pydantic = "^2.6.4"
 lightning = "^2.2.1"
 pyloudnorm = "^0.1.1"
 schedulefree = "^1.2.5"
+ray = {extras = ["tune"], version = "^2.11.0"}
 
 [build-system]
 requires = ["poetry-core"]

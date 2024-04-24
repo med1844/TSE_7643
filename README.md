@@ -44,6 +44,8 @@ python preprocess_wav_dataset.py datasets/cn datasets/en datasets/jp
 
 ### Build TSE dataset
 
+There's not much TSE datasets available out there, especially for high-res ones. We have to generate them by ourselves. Luckily it turns out that as long as you have speech datasets with each utterance having it's speaker information, you can generate a TSE dataset based on that information.
+
 Generate dataset during each run is time consuming, especially when the training dataset is large. Thus we generate the TSE dataset first before training.
 
 You need `build_tse_dataset.py` to build the dataset. It's ok to have multiple valid datasets, where each of them has structure "./{spk_id}/*.wav". Here's an example:
@@ -67,3 +69,15 @@ Or if you wish to use custom config, pass `--config` or `-c`:
 ```bash
 python main.py -c configs/default.json -d datasets/output_tse
 ```
+
+## Hyperparam search
+
+We use ray tune to search for the best hyper parameters. Here's an example command:
+
+```bash
+python grid_search.py -c configs/small.json -d $DATASET_PATH -n 5 --wavlm_pt $(pwd)/pretrained_models/WavLM-Base+.pt
+```
+
+Ensure the `--wavlm_pt` is an absolute path.
+
+To modify the parameters to be searched, please refer to `search_space` in `grid_search.py`.
