@@ -24,6 +24,18 @@ poetry config cache-dir $HOME/scratch/.cache
 poetry config virtualenvs.in-project true
 ```
 
+### Install dependencies
+
+```bash
+poetry install --no-root
+```
+
+### Activate poetry venv
+
+```bash
+source .venv/bin/activate
+```
+
 ## Prepare pretrained models
 
 At project root, run:
@@ -75,7 +87,7 @@ python main.py -c configs/default.json -d datasets/output_tse
 We use ray tune to search for the best hyper parameters. Here's an example command:
 
 ```bash
-python grid_search.py -c configs/small.json -d $DATASET_PATH -n 5 --wavlm_pt $(pwd)/pretrained_models/WavLM-Base+.pt
+python grid_search.py -c configs/small.json -d datasets/output_tse -n 5 --wavlm_pt $(pwd)/pretrained_models/WavLM-Base+.pt
 ```
 
 Ensure the `--wavlm_pt` is an absolute path.

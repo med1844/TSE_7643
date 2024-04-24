@@ -1,18 +1,18 @@
 {
     "exp_name": "tse",
-    "epochs": 10,
-    "batch_size": 6,
+    "epochs": 100,
+    "batch_size": 24,
     "tse_args": {
         "win_size": 1200,
         "spk_emb_dim": 512,
         "num_wavlm_adapt_layers": 1,
         "x_vec_adaptor_hidden_size": 512,
-        "num_mask_pred_conformer_blocks": 3
+        "num_mask_pred_conformer_blocks": 8
     },
-    "learning_rate": 0.001,
+    "learning_rate": 0.107138,
     "adamw_betas": [
         0.9,
-        0.99
+        0.999
     ],
     "lr_decay": 0.999
 }
