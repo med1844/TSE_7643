@@ -1,7 +1,7 @@
 {
     "exp_name": "tse",
     "epochs": 10,
-    "batch_size": 4,
+    "batch_size": 8,
     "tse_args": {
         "win_size": 1200,
         "spk_emb_dim": 512,

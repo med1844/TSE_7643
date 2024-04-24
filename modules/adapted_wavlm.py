@@ -137,12 +137,13 @@ class AdaptedTransformerSentenceEncoderLayer(nn.Module):
 class AdaptedWavLMArgs(BaseModel):
     spk_emb_dim: int = 512
     num_adaptation_layers: int = 1
+    wavlm_pt: str = "pretrained_models/WavLM-Base+.pt"
 
 
 class AdaptedWavLM(nn.Module):
-    def __init__(self, args: AdaptedWavLMArgs, device=None):
+    def __init__(self, args: AdaptedWavLMArgs):
         super().__init__()
-        self.wavlm_base_plus = WavLMBasePlus(device=device)
+        self.wavlm_base_plus = WavLMBasePlus(args.wavlm_pt)
         self.adaptation_layers = nn.ModuleList(
             [
                 AdaptedTransformerSentenceEncoderLayer(args.spk_emb_dim)

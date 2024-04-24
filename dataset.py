@@ -255,9 +255,12 @@ def tse_item_collate_fn(alignment: int, batch: List[TSETrainItem]) -> TSETrainIt
 
 class TSEDataLoader(DataLoader):
     def __init__(self, stft_hop_size: int, *args, **kwargs):
-        super().__init__(
-            *args, **kwargs, collate_fn=partial(tse_item_collate_fn, stft_hop_size)
-        )
+        super(TSEDataLoader, self).__init__(*args, **kwargs)
+        self.stft_hop_size = stft_hop_size
+        self.collate_fn = self.collate_fn_with_hop_size
+
+    def collate_fn_with_hop_size(self, batch: List[TSETrainItem]) -> TSETrainItem:
+        return tse_item_collate_fn(self.stft_hop_size, batch)
 
 
 def sum_ge(len_seq: Iterable[int], target: int) -> bool:

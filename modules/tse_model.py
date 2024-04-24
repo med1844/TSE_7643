@@ -14,12 +14,14 @@ class TSEModelArgs(BaseModel):
     num_wavlm_adapt_layers: int = 1
     x_vec_adaptor_hidden_size: int = 512
     num_mask_pred_conformer_blocks: int = 16
+    wavlm_pt: str = "pretrained_models/WavLM-Base+.pt"
 
     @property
     def adapted_wavlm_args(self) -> AdaptedWavLMArgs:
         return AdaptedWavLMArgs(
             spk_emb_dim=self.spk_emb_dim,
             num_adaptation_layers=self.num_wavlm_adapt_layers,
+            wavlm_pt=self.wavlm_pt,
         )
 
     @property
