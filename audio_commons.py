@@ -1,4 +1,4 @@
-from typing import BinaryIO, Tuple, Union, Optional, List, Iterable
+from typing import BinaryIO, Tuple, Union, Optional, List, Iterator
 import torch
 import torchaudio
 from PIL import Image
@@ -9,6 +9,22 @@ import numpy as np
 import pyloudnorm
 from pydantic import BaseModel
 from dataclasses import dataclass
+
+
+def amplitude_to_db_torch(magnitude: torch.Tensor, ref=1.0, amin=1e-5, top_db=80.0):
+    power = torch.square(magnitude)
+
+    log_spec = 10.0 * torch.log10(torch.maximum(torch.tensor(amin**2), power))
+    log_spec -= 10.0 * torch.log10(torch.tensor(max(amin**2, ref**2)))
+    log_spec = torch.clamp(log_spec, min=log_spec.max() - top_db)
+    log_spec = torch.clamp(log_spec, min=-100)
+
+    return log_spec
+
+
+def db_to_amplitude_torch(db: torch.Tensor, ref=1.0):
+    power = ref**2 * torch.pow(10, db / 10.0)
+    return torch.sqrt(power)
 
 
 class STFTArgs(BaseModel):
@@ -38,26 +54,29 @@ class Spectrogram:
             return_complex=True,
         )
         wav_stft = torch.einsum("bnt -> btn", wav_stft)
-        wav_mag = wav_stft.abs()
+        wav_mag = amplitude_to_db_torch(wav_stft.abs())
         wav_phase = wav_stft.angle()
-        wav_spec = torch.log(wav_mag**2).clamp_min(-100)
-        return cls(wav_spec, wav_phase)
+        return cls(wav_mag, wav_phase)
 
     def to_wav(self, stft_args: STFTArgs) -> torch.Tensor:
-        copy_spec = self.spec.clone()
-        copy_spec[copy_spec <= -100] = -torch.inf
-        copy_mag = torch.sqrt(torch.exp(copy_spec))
-        spectrum = torch.einsum("btn -> bnt", torch.polar(copy_mag, self.phase))
+        wav_mag = db_to_amplitude_torch(self.spec)
+        spectrum = torch.einsum("btn -> bnt", torch.polar(wav_mag, self.phase))
         wav = torch.istft(
             spectrum,
             n_fft=stft_args.win_size,
             hop_length=stft_args.hop_size,
             win_length=stft_args.win_size,
-            window=stft_args.window.to(copy_mag.device),
+            window=stft_args.window.to(self.spec.device),
         )
         return wav
 
-    def __iter__(self) -> Iterable[torch.Tensor]:
+    def plot_to_tensor(self) -> torch.Tensor:
+        # assume it's batched...
+        img = plot_spectrogram(self.spec.detach().cpu().numpy()[0].T)
+        img = img.convert("RGB")
+        return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+
+    def __iter__(self) -> Iterator[torch.Tensor]:
         return iter((self.spec, self.phase))
 
 
@@ -73,9 +92,15 @@ def read_wav_at_fs(
     return y, fs
 
 
-def plot_spectrogram(spectrogram: np.ndarray):
+def plot_spectrogram(spectrogram: np.ndarray) -> Image.Image:
     fig, ax = plt.subplots(figsize=(10, 4))
-    plt.imshow(spectrogram, aspect="auto", origin="lower", interpolation="none")
+    plt.imshow(
+        spectrogram,
+        aspect="auto",
+        origin="lower",
+        interpolation="none",
+        cmap="magma",
+    )
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png")

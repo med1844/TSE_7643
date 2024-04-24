@@ -22,7 +22,6 @@ from pathlib import Path
 import pickle
 from copy import deepcopy
 from pydantic import BaseModel
-from functools import partial
 from tqdm import tqdm
 
 

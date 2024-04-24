@@ -173,8 +173,9 @@ class AdaptedWavLM(nn.Module):
         features = model.dropout_input(features)
 
         # put adaptation layer here
+        adapt_features = features.clone()
         for layer in self.adaptation_layers:
-            features = layer(features, spk_emb)
+            adapt_features = layer(adapt_features, spk_emb)
 
-        x, _ = model.encoder(features)
+        x, _ = model.encoder(features + adapt_features)
         return x
