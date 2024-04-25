@@ -162,20 +162,21 @@ class AdaptedWavLM(nn.Module):
         - https://arxiv.org/abs/2211.00482
         - https://github.com/sinhat98/adapter-wavlm/blob/main/modeling.py
         """
-        model = self.wavlm_base_plus.model
-        features = model.feature_extractor(mix)
-        features = features.transpose(1, 2)
-        features = model.layer_norm(features)
+        # model = self.wavlm_base_plus.model
+        # features = model.feature_extractor(mix)
+        # features = features.transpose(1, 2)
+        # features = model.layer_norm(features)
 
-        if model.post_extract_proj is not None:
-            features = model.post_extract_proj(features)
+        # if model.post_extract_proj is not None:
+        #     features = model.post_extract_proj(features)
 
-        features = model.dropout_input(features)
+        # features = model.dropout_input(features)
 
-        # put adaptation layer here
+        features = self.wavlm_base_plus(mix)
         adapt_features = features.clone()
         for layer in self.adaptation_layers:
             adapt_features = layer(adapt_features, spk_emb)
+        return features + adapt_features
 
-        x, _ = model.encoder(features + adapt_features)
-        return x
+        # x, _ = model.encoder(features + adapt_features)
+        # return x

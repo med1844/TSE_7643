@@ -11,7 +11,7 @@ from dataset import (
 from tse_ln_module import TrainArgs, TSEModule
 
 
-def train(args: TrainArgs, dataset_path: str):
+def train(args: TrainArgs, dataset_path: str, model_ckpt: Optional[str]):
     hop_size = args.tse_args.stft_args.hop_size
     train_ds, val_ds, _ = TSEDatasetBuilder.from_folder(Path(dataset_path))
     train_loader = TSEDataLoader(
@@ -30,7 +30,7 @@ def train(args: TrainArgs, dataset_path: str):
         callbacks=[checkpoint_callback],
         logger=logger,
     )
-    trainer.fit(module, train_loader, val_loader)
+    trainer.fit(module, train_loader, val_loader, ckpt_path=model_ckpt)
 
 
 @click.command()
@@ -45,13 +45,18 @@ def train(args: TrainArgs, dataset_path: str):
     "-d",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
 )
-def main(config: Optional[str], dataset: str):
+@click.option(
+    "--model_ckpt",
+    "-m",
+    type=click.Path(exists=False, file_okay=True, dir_okay=False),
+)
+def main(config: Optional[str], dataset: str, model_ckpt: Optional[str]):
     if config is None:
         args = TrainArgs.default()
     else:
         with open(config, "r", encoding="utf-8") as f:
             args = TrainArgs.model_validate_json(f.read())
-    train(args, dataset)
+    train(args, dataset, model_ckpt)
 
 
 if __name__ == "__main__":

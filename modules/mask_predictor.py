@@ -37,7 +37,7 @@ class MaskPredictor(nn.Module):
             nn.LayerNorm(args.attn_dim),
             nn.ReLU(),
             nn.Linear(args.attn_dim, args.real_fft_dim),
-            nn.Softplus(),
+            nn.Sigmoid(),
         )
 
     def forward(self, adapted_wavlm_feature: torch.Tensor, mix_mag: torch.Tensor):

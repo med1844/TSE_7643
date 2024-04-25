@@ -73,13 +73,13 @@ In the example above, all three input has subdirectories and files that matches 
 With default config, you can start training with this command:
 
 ```bash
-python main.py --dataset datasets/output_tse
+python train.py --dataset datasets/output_tse
 ```
 
 Or if you wish to use custom config, pass `--config` or `-c`:
 
 ```bash
-python main.py -c configs/default.json -d datasets/output_tse
+python train.py -c configs/default.json -d datasets/output_tse
 ```
 
 ## Hyperparam search

@@ -1,6 +1,6 @@
 {
     "exp_name": "tse",
-    "epochs": 10,
+    "epochs": 50,
     "batch_size": 4,
     "tse_args": {
         "win_size": 1200,
@@ -13,6 +13,5 @@
     "adamw_betas": [
         0.9,
         0.999
-    ],
-    "lr_decay": 0.999
+    ]
 }

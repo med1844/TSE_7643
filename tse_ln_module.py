@@ -14,7 +14,7 @@ from dataset import (
     TSEPredictItem,
     TSETrainItem,
 )
-from audio_commons import Spectrogram, plot_spectrogram_to_tensor
+from audio_commons import Spectrogram
 
 
 class TrainArgs(BaseModel):
@@ -24,7 +24,6 @@ class TrainArgs(BaseModel):
     tse_args: TSEModelArgs
     learning_rate: float
     adamw_betas: Tuple[float, float] = (0.9, 0.99)
-    lr_decay: float = 0.999
     train_loss_fn: Literal["l1", "l2"] = "l1"
 
     @classmethod
@@ -49,9 +48,10 @@ class TSEModule(LightningModule):
 
     def training_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
-        est_y_spec = self.model(TSEPredictItem(mix, ref))
+        est_y_spec, mask = self.model(TSEPredictItem(mix, ref))
         y_spec = Spectrogram.from_wav(self.args.tse_args.stft_args, y)
-        loss = self.train_loss_fn(est_y_spec.spec, y_spec.spec)
+        est_y = est_y_spec.to_wav(self.args.tse_args.stft_args)
+        loss = -si_snr(est_y, y).mean()
         if torch.isnan(loss):
             print("nan detected!")
             exit()
@@ -64,20 +64,38 @@ class TSEModule(LightningModule):
                 Spectrogram.from_wav(
                     self.args.tse_args.stft_args, mix
                 ).plot_to_tensor(),
+                global_step=self.global_step,
             )
             self.logger.experiment.add_image(
-                "est_y_spec",
-                est_y_spec.plot_to_tensor(),
+                "est_y_spec", est_y_spec.plot_to_tensor(), global_step=self.global_step
             )
             self.logger.experiment.add_image(
-                "y_spec",
-                y_spec.plot_to_tensor(),
+                "y_spec", y_spec.plot_to_tensor(), global_step=self.global_step
             )
+            self.logger.experiment.add_image(
+                "mask", mask.detach()[0], global_step=self.global_step, dataformats="WH"
+            )
+            self.logger.experiment.add_audio(
+                "mix", mix[0], global_step=self.global_step, sample_rate=48000
+            )
+            self.logger.experiment.add_audio(
+                "ref", ref[0], global_step=self.global_step, sample_rate=48000
+            )
+            self.logger.experiment.add_audio(
+                "y", y[0], global_step=self.global_step, sample_rate=48000
+            )
+            self.logger.experiment.add_audio(
+                "est_y",
+                est_y_spec.to_wav(self.args.tse_args.stft_args).detach()[0],
+                global_step=self.global_step,
+                sample_rate=48000,
+            )
+
         return loss
 
     def validation_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
-        est_y_spec = self.model(TSEPredictItem(mix, ref))
+        est_y_spec, mask = self.model(TSEPredictItem(mix, ref))
         #! use ref or y here?
         # use y since we want to know how well TSE works against ground truth
         est_y = est_y_spec.to_wav(self.args.tse_args.stft_args)
@@ -91,19 +109,33 @@ class TSEModule(LightningModule):
                 Spectrogram.from_wav(
                     self.args.tse_args.stft_args, mix
                 ).plot_to_tensor(),
+                global_step=self.global_step,
             )
             self.logger.experiment.add_image(
                 "est_y_spec",
                 est_y_spec.plot_to_tensor(),
+                global_step=self.global_step,
             )
             self.logger.experiment.add_image(
                 "y_spec",
                 y_spec.plot_to_tensor(),
+                global_step=self.global_step,
             )
-            self.logger.experiment.add_audio("mix", mix[0], sample_rate=48000)
-            self.logger.experiment.add_audio("ref", ref[0], sample_rate=48000)
-            self.logger.experiment.add_audio("y", y[0], sample_rate=48000)
-            self.logger.experiment.add_audio("est_y", est_y[0], sample_rate=48000)
+            self.logger.experiment.add_image(
+                "mask", mask.detach()[0], global_step=self.global_step, dataformats="WH"
+            )
+            self.logger.experiment.add_audio(
+                "mix", mix[0], global_step=self.global_step, sample_rate=48000
+            )
+            self.logger.experiment.add_audio(
+                "ref", ref[0], global_step=self.global_step, sample_rate=48000
+            )
+            self.logger.experiment.add_audio(
+                "y", y[0], global_step=self.global_step, sample_rate=48000
+            )
+            self.logger.experiment.add_audio(
+                "est_y", est_y[0], global_step=self.global_step, sample_rate=48000
+            )
 
     def on_validation_epoch_end(self):
         avg_loss = self.eval_si_snr_mean.compute()
