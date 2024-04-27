@@ -21,7 +21,7 @@ def train(args: TrainArgs, dataset_path: str, model_ckpt: Optional[str]):
 
     module = TSEModule(args)
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss", mode="min", save_top_k=3, dirpath="checkpoints/"
+        monitor="eval_loss", mode="min", save_top_k=3, dirpath="checkpoints/"
     )
     logger = TensorBoardLogger("tb_logs", name=args.exp_name)
 

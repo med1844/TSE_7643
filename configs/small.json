@@ -5,7 +5,7 @@
     "tse_args": {
         "win_size": 1200,
         "spk_emb_dim": 512,
-        "num_wavlm_adapt_layers": 1,
+        "num_wavlm_adapt_layers": 3,
         "x_vec_adaptor_hidden_size": 512,
         "num_mask_pred_conformer_blocks": 3
     },

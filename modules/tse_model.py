@@ -1,4 +1,5 @@
-from typing import Tuple
+from dataclasses import dataclass
+from typing import Iterator, Union
 import torch
 import torch.nn as nn
 from modules.adapted_x_vec import AdaptedXVector, AdaptedXVectorArgs
@@ -44,6 +45,16 @@ class TSEModelArgs(BaseModel):
         return STFTArgs(win_size=self.win_size)
 
 
+@dataclass
+class TSEPredictionResult:
+    est_y_spec: Spectrogram
+    mask: torch.Tensor
+    adapted_wavlm_features: torch.Tensor
+
+    def __iter__(self) -> Iterator[Union[Spectrogram, torch.Tensor]]:
+        return iter((self.est_y_spec, self.mask, self.adapted_wavlm_features))
+
+
 class TSEModel(nn.Module):
     def __init__(self, args: TSEModelArgs) -> None:
         super().__init__()
@@ -52,7 +63,7 @@ class TSEModel(nn.Module):
         self.adapted_x_vec = AdaptedXVector(args.adapted_x_vec_args)
         self.mask_predictor = MaskPredictor(args.mask_predictor_args)
 
-    def forward(self, batch: TSEPredictItem) -> Tuple[Spectrogram, torch.Tensor]:
+    def forward(self, batch: TSEPredictItem) -> TSEPredictionResult:
         mix, ref = batch
         # mix: B x T, ref: B x T', y: B x T
         spk_emb = self.adapted_x_vec(ref)
@@ -67,4 +78,6 @@ class TSEModel(nn.Module):
         )
         mask = self.mask_predictor(dup_pad_wavlm_features, mix_spec)
         est_y_spec = mix_spec * mask
-        return Spectrogram(est_y_spec, mix_phase), mask
+        return TSEPredictionResult(
+            Spectrogram(est_y_spec, mix_phase), mask, wavlm_features
+        )

@@ -19,14 +19,12 @@ from dataset import TSEDatasetBuilder, TSEDataLoader
 
 search_space = {
     "learning_rate": tune.loguniform(1e-4, 1e-0),
-    "train_loss_fn": tune.choice(["l1", "l2"]),
     "adamw_betas": tune.choice([(0.9, 0.999), (0.95, 0.995)]),
 }
 
 
 def train_fn(dataset_path: str, args: TrainArgs, wavlm_pt: str, config: Dict[str, Any]):
     args.learning_rate = config["learning_rate"]
-    args.train_loss_fn = config["train_loss_fn"]
     args.adamw_betas = config["adamw_betas"]
     args.tse_args.wavlm_pt = wavlm_pt
     hop_size = args.tse_args.stft_args.hop_size
@@ -58,7 +56,7 @@ def tune_tse(dataset_path: str, args: TrainArgs, wavlm_pt: str, num_samples=10):
         ray_trainer,
         param_space={"train_loop_config": search_space},
         tune_config=tune.TuneConfig(
-            metric="val_loss",
+            metric="eval_loss",
             mode="min",
             num_samples=num_samples,
             scheduler=scheduler,
@@ -98,7 +96,7 @@ def main(config: Optional[str], dataset: str, wavlm_pt: str, num_samples: int):
             args = TrainArgs.model_validate_json(f.read())
     results = tune_tse(dataset, args, wavlm_pt, num_samples)
     print(results)
-    print(results.get_best_result(metric="val_loss", mode="min"))
+    print(results.get_best_result(metric="eval_loss", mode="min"))
 
 
 if __name__ == "__main__":
