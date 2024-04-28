@@ -1,6 +1,6 @@
 {
     "exp_name": "tse",
-    "epochs": 50,
+    "epochs": 10,
     "batch_size": 4,
     "tse_args": {
         "win_size": 1200,

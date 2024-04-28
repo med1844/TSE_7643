@@ -4,9 +4,6 @@ import torch.nn as nn
 import torch.optim
 from torchaudio.backend import torchaudio
 from lightning.pytorch import LightningModule
-from torchmetrics.functional.audio.snr import (
-    scale_invariant_signal_noise_ratio as si_snr,
-)
 from pydantic import BaseModel
 from schedulefree import AdamWScheduleFree
 from modules.tse_model import TSEModelArgs, TSEModel
@@ -14,7 +11,7 @@ from dataset import (
     TSEPredictItem,
     TSETrainItem,
 )
-from audio_commons import Spectrogram
+from audio_commons import Spectrogram, plot_spectrogram_mask
 
 
 class TrainArgs(BaseModel):
@@ -42,9 +39,16 @@ class TSEModule(LightningModule):
         self.args = args
         self.model = TSEModel(args.tse_args)
 
+    def __calc_ideal_mask(self, mix: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        mix_spec = Spectrogram.from_wav(self.args.tse_args.stft_args, mix)
+        y_spec = Spectrogram.from_wav(self.args.tse_args.stft_args, y)
+        ideal_mask = mix_spec.spec - y_spec.spec
+        return ideal_mask
+
     def train_loss(
         self,
-        est_y_spec: Spectrogram,
+        ideal_mask: torch.Tensor,
+        mask: torch.Tensor,
         y: torch.Tensor,
         adapted_wavlm_features: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -53,13 +57,14 @@ class TSEModule(LightningModule):
             y_features = self.model.adapted_wavlm.wavlm_base_plus(
                 torchaudio.functional.resample(y, 48000, 16000)
             )
-        wavlm_loss = nn.functional.mse_loss(adapted_wavlm_features, y_features.clone())
+        wavlm_loss = (
+            nn.functional.mse_loss(adapted_wavlm_features, y_features.clone()) * 100
+        )  # empirical factor
 
-        # calculate time domain loss
-        est_y = est_y_spec.to_wav(self.args.tse_args.stft_args)
-        y_loss = -si_snr(est_y, y).mean()
+        # calculate mask loss
+        mask_loss = nn.functional.mse_loss(ideal_mask, mask)
 
-        return y_loss, wavlm_loss
+        return mask_loss, wavlm_loss
 
     def __log_audio_n_spec(
         self,
@@ -68,6 +73,7 @@ class TSEModule(LightningModule):
         y: torch.Tensor,
         est_y_spec: Spectrogram,
         mask: torch.Tensor,
+        ideal_mask: torch.Tensor,
     ):
         self.logger.experiment.add_image(
             "mix_spec",
@@ -82,7 +88,14 @@ class TSEModule(LightningModule):
             "y_spec", y_spec.plot_to_tensor(), global_step=self.global_step
         )
         self.logger.experiment.add_image(
-            "mask", mask.detach()[0], global_step=self.global_step, dataformats="WH"
+            "mask",
+            plot_spectrogram_mask(mask.detach()[0].T),
+            global_step=self.global_step,
+        )
+        self.logger.experiment.add_image(
+            "ideal_mask",
+            plot_spectrogram_mask(ideal_mask[0].T),
+            global_step=self.global_step,
         )
         self.logger.experiment.add_audio(
             "mix", mix[0], global_step=self.global_step, sample_rate=48000
@@ -102,21 +115,21 @@ class TSEModule(LightningModule):
 
     def __log_loss(
         self,
-        y_loss: torch.Tensor,
+        mask_loss: torch.Tensor,
         wavlm_loss: torch.Tensor,
         phase: Literal["train", "eval"],
     ):
         self.log(
             f"{phase}_loss",
-            y_loss + wavlm_loss,
+            mask_loss + wavlm_loss,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
         )
         self.log(
-            f"{phase}_y_si_snr_loss",
-            y_loss,
+            f"{phase}_mask_loss",
+            mask_loss,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -134,15 +147,19 @@ class TSEModule(LightningModule):
     def training_step(self, batch: TSETrainItem, batch_idx: int):
         mix, ref, y = batch
         est_y_spec, mask, adapted_wavlm_features = self.model(TSEPredictItem(mix, ref))
-        y_loss, wavlm_loss = self.train_loss(est_y_spec, y, adapted_wavlm_features)
-        loss = y_loss + wavlm_loss
+
+        ideal_mask = self.__calc_ideal_mask(mix, y)
+        mask_loss, wavlm_loss = self.train_loss(
+            ideal_mask, mask, y, adapted_wavlm_features
+        )
+        loss = mask_loss + wavlm_loss
 
         if torch.isnan(loss):
             print("nan detected!")
             exit()
-        self.__log_loss(y_loss, wavlm_loss, "train")
+        self.__log_loss(mask_loss, wavlm_loss, "train")
         if batch_idx % 100 == 0:
-            self.__log_audio_n_spec(mix, ref, y, est_y_spec, mask)
+            self.__log_audio_n_spec(mix, ref, y, est_y_spec, mask, ideal_mask)
         return loss
 
     def validation_step(self, batch: TSETrainItem, batch_idx: int):
@@ -151,10 +168,13 @@ class TSEModule(LightningModule):
         #! use ref or y here?
         # use y since we want to know how well TSE works against ground truth
 
-        y_loss, wavlm_loss = self.train_loss(est_y_spec, y, adapted_wavlm_features)
-        self.__log_loss(y_loss, wavlm_loss, "eval")
+        ideal_mask = self.__calc_ideal_mask(mix, y)
+        mask_loss, wavlm_loss = self.train_loss(
+            ideal_mask, mask, y, adapted_wavlm_features
+        )
+        self.__log_loss(mask_loss, wavlm_loss, "eval")
         if batch_idx % 10 == 0:
-            self.__log_audio_n_spec(mix, ref, y, est_y_spec, mask)
+            self.__log_audio_n_spec(mix, ref, y, est_y_spec, mask, ideal_mask)
 
     def configure_optimizers(self):
         optimizer = AdamWScheduleFree(

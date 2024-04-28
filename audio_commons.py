@@ -94,20 +94,55 @@ def read_wav_at_fs(
 
 def plot_spectrogram(spectrogram: np.ndarray) -> Image.Image:
     fig, ax = plt.subplots(figsize=(10, 4))
-    plt.imshow(
+    cax = plt.imshow(
         spectrogram,
         aspect="auto",
         origin="lower",
         interpolation="none",
         cmap="magma",
     )
-
+    fig.colorbar(cax, ax=ax, format="%+2.0f dB")
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")
+    plt.savefig(buf, format="png", bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     image = Image.open(buf)
     return image
+
+
+def plot_spectrogram_mask(mask: torch.Tensor) -> torch.Tensor:
+    # normalize spectrogram to the range [-1, 1] around 0 dB.
+    # assuming spectrogram is in dB scale and 0 dB is the max value.
+    mask_max = max(mask.max().abs().item(), mask.min().abs().item())
+    mask = mask.detach().cpu().numpy()
+
+    # create the plot
+    fig, ax = plt.subplots(figsize=(10, 4))
+    # use a diverging colormap and center the colorbar at 0 dB
+    cax = ax.imshow(
+        mask,
+        aspect="auto",
+        origin="lower",
+        interpolation="none",
+        cmap="bwr",  # this is an example of a diverging colormap
+        vmin=-mask_max,
+        vmax=mask_max,  # set the color limits to +/- the normalized dB
+    )
+
+    # add a color bar with a label
+    cbar = fig.colorbar(cax, ax=ax, format="%+2.0f dB")
+    cbar.set_label("Relative power (dB)", rotation=270, labelpad=15)
+
+    # save the plot to a buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+
+    # load the image from the buffer and return as PIL Image
+    img = Image.open(buf)
+    img = img.convert("RGB")
+    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
 
 
 def dynamic_range_compression(x, C=1, clip_val=1e-5):

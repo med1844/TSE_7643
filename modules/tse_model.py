@@ -77,7 +77,7 @@ class TSEModel(nn.Module):
             dup_wavlm_features, (0, 0, 0, padding_needed), mode="replicate"
         )
         mask = self.mask_predictor(dup_pad_wavlm_features, mix_spec)
-        est_y_spec = mix_spec * mask
+        est_y_spec = (mix_spec - mask).clamp(min=-100)
         return TSEPredictionResult(
             Spectrogram(est_y_spec, mix_phase), mask, wavlm_features
         )
